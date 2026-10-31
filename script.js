@@ -421,6 +421,7 @@ function translateToHindi(instructions) {
 function showGuide(task, plan = null, startingStep = 0) {
 
     const isHindi = language.value === "hi";
+    const guideLanguage = plan?.language || language.value;
     const text = task.toLowerCase();
     const isDocumentTask = plan
         ? plan.category === "fee_receipt" && plan.supported === true
@@ -566,7 +567,13 @@ function showGuide(task, plan = null, startingStep = 0) {
             <p>${isHindi ? "आपने सिम्युलेटेड चरण पूरे किए। कोई वास्तविक फ़ाइल डाउनलोड नहीं हुई।" : "You completed the simulated steps. No real file was downloaded."}</p>
             <button id="restartVisual" class="start-btn" type="button">${isHindi ? "फिर से शुरू करें" : "Start again"}</button>`;
         targetIds.forEach(id => guide.querySelector(`#${id}`).classList.remove("active-target"));
-        guide.querySelector("#restartVisual").onclick = () => showGuide(task);
+        guide.querySelector("#restartVisual").onclick = () => {
+            if (language.value !== guideLanguage) {
+                language.value = guideLanguage;
+                applyPageLanguage();
+            }
+            showGuide(task, plan, 0);
+        };
     }
 
     function advanceStep() {
