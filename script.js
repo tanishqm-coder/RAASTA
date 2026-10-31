@@ -232,10 +232,14 @@ async function requestTaskGuide(task, startingStep = 0) {
             throw new Error("Unsupported tasks cannot target portal controls.");
         }
 
-        if (result.mode === "demo") {
+        if (result.mode === "fallback") {
+            setTaskStatus(result.message || (isHindi
+                ? "Gemini अभी उपलब्ध नहीं है; सुरक्षित स्थानीय मार्गदर्शन दिखाया जा रहा है।"
+                : "Gemini is temporarily unavailable; showing the safe local guide."), "demo");
+        } else if (result.mode === "demo") {
             setTaskStatus(isHindi
-                ? "डेमो मोड: स्थानीय उदाहरण चल रहा है। AI API के लिए सर्वर पर OPENAI_API_KEY जोड़ें।"
-                : "Demo mode: using the local example. Add OPENAI_API_KEY on the server to enable AI.", "demo");
+                ? "डेमो मोड: स्थानीय उदाहरण चल रहा है। AI मार्गदर्शन के लिए सर्वर पर GEMINI_API_KEY सेट करें।"
+                : "Demo mode: using the local example. Configure GEMINI_API_KEY on the server to enable AI.", "demo");
         } else {
             setTaskStatus("");
         }
