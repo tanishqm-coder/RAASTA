@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Raasta | Technology Without Confusion</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+
+        <div class="logo">
+            <span class="logo-icon">R</span>
+            <span>raasta</span>
+        </div>
+
+        <div class="nav-right">
+            <select id="language">
+                <option value="en">English</option>
+                <option value="hi">हिन्दी</option>
+            </select>
+
+            <a href="#how-it-works" class="nav-link" id="howLink">How it works</a>
+        </div>
+
+    </nav>
+
+
+    <!-- Main Section -->
+    <main class="hero">
+
+        <div class="hero-content">
+
+            <div class="tagline">
+                ✨ <span id="heroTagline">YOUR PERSONAL DIGITAL GUIDE</span>
+            </div>
+
+            <h1>
+                <span id="heroTitle" class="neutral-heading">Technology should be</span>
+                <span id="heroTitleAccent">easy for everyone.</span>
+            </h1>
+
+            <p class="description">
+                <span id="heroDescription">Confused about using an app or website? Just tell us what you want to do. We'll guide you, one simple step at a time.</span>
+            </p>
+
+
+            <!-- User Input Box -->
+            <div class="input-card">
+
+                <label for="taskInput">
+                    <span id="taskLabel">What would you like help with today?</span>
+                </label>
+
+                <textarea
+                    id="taskInput"
+                    placeholder="Example: I want to download my college fee receipt..."
+                    rows="3"
+                    aria-label="What would you like help with today?"
+                ></textarea>
+
+                <div class="input-actions">
+
+                    <button id="voiceBtn" class="voice-btn">
+                        🎤 <span id="voiceLabel">Speak</span>
+                    </button>
+
+                    <button id="startBtn" class="start-btn">
+                        <span id="startLabel">Guide me</span> →
+                    </button>
+
+                </div>
+
+                <p id="taskStatus" class="task-status" role="status" aria-live="polite" hidden></p>
+
+            </div>
+
+
+            <!-- Suggested Tasks -->
+            <div class="suggestions">
+
+                <p id="suggestionPrompt">Not sure where to start? Try these:</p>
+
+                <div class="suggestion-buttons">
+
+                    <button class="suggestion"
+                        data-task="I want to book a train ticket">
+                        🚆 <span id="suggestionTrainLabel">Book a train ticket</span>
+                    </button>
+
+                    <button class="suggestion"
+                        data-task="I want to download a document">
+                        📄 <span id="suggestionDocumentLabel">Download a document</span>
+                    </button>
+
+                    <button class="suggestion"
+                        data-task="I want to learn how to use my phone">
+                        📱 <span id="suggestionPhoneLabel">Learn smartphone basics</span>
+                    </button>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- Right Side Illustration -->
+        <div class="hero-illustration">
+
+            <div class="illustration-circle">
+                <div class="illustration-icon">🧭</div>
+            </div>
+
+            <div class="floating-card card-one">
+                🌐 <span id="cardWebsite">Any website</span>
+            </div>
+
+            <div class="floating-card card-two">
+                🗣️ <span id="cardLanguage">Your language</span>
+            </div>
+
+            <div class="floating-card card-three">
+                👆 <span id="cardGuidance">Step-by-step guidance</span>
+            </div>
+
+        </div>
+
+    </main>
+
+
+    <!-- How It Works -->
+    <section id="how-it-works" class="how-section">
+
+        <h2 id="howTitle">Simple as 1, 2, 3.</h2>
+
+        <p class="section-description">
+            <span id="howDescription">You don't need to be a tech expert. We've got you covered.</span>
+        </p>
+
+        <div class="steps">
+
+            <div class="step-card">
+                <div class="step-icon">💬</div>
+                <h3 id="howTellTitle">Tell us</h3>
+                <p id="howTellDescription">Describe what you want to accomplish.</p>
+            </div>
+
+            <div class="step-card">
+                <div class="step-icon">🧠</div>
+                <h3 id="howUnderstandTitle">We understand</h3>
+                <p id="howUnderstandDescription">We break your task into simple instructions.</p>
+            </div>
+
+            <div class="step-card">
+                <div class="step-icon">🚀</div>
+                <h3 id="howGuidedTitle">You're guided</h3>
+                <p id="howGuidedDescription">Follow each step at your own pace.</p>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- JavaScript -->
+    <script src="script.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,585 @@
+/* Basic Reset */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f8f9fc;
+    color: #20243a;
+}
+
+
+/* Navigation Bar */
+
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding: 22px 8%;
+
+    background: white;
+    border-bottom: 1px solid #eeeeee;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    font-size: 26px;
+    font-weight: bold;
+    color: #4034a5;
+}
+
+.logo-icon {
+    background: #5145cd;
+    color: white;
+
+    width: 38px;
+    height: 38px;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    border-radius: 12px;
+}
+
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 25px;
+}
+
+#language {
+    padding: 10px;
+    border: 1px solid #dddddd;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+}
+
+.nav-link {
+    text-decoration: none;
+    color: #444;
+    font-size: 14px;
+}
+
+
+/* Main Hero Section */
+
+.hero {
+    min-height: 570px;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding: 65px 10%;
+    gap: 50px;
+}
+
+.hero-content {
+    flex: 1;
+    max-width: 650px;
+}
+
+.tagline {
+    display: inline-block;
+
+    background: #eeecff;
+    color: #5145cd;
+
+    padding: 10px 15px;
+    border-radius: 30px;
+
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 1px;
+
+    margin-bottom: 25px;
+}
+
+h1 {
+    font-size: clamp(36px, 5vw, 56px);
+    line-height: 1.15;
+    margin-bottom: 20px;
+}
+
+h1 span {
+    color: #5145cd;
+}
+
+h1 .neutral-heading {
+    color: #20243a;
+}
+
+.description {
+    font-size: 17px;
+    color: #686b7d;
+    line-height: 1.7;
+
+    margin-bottom: 30px;
+}
+
+
+/* Input Card */
+
+.input-card {
+    background: white;
+
+    padding: 24px;
+    border-radius: 16px;
+
+    box-shadow: 0 8px 35px rgba(0, 0, 0, 0.07);
+
+    border: 1px solid #eeeeee;
+}
+
+.input-card label {
+    display: block;
+
+    font-size: 15px;
+    font-weight: bold;
+
+    margin-bottom: 15px;
+}
+
+textarea {
+    width: 100%;
+    resize: vertical;
+
+    padding: 15px;
+
+    border: 1px solid #dddddd;
+    border-radius: 10px;
+
+    font-family: inherit;
+    font-size: 15px;
+
+    outline: none;
+}
+
+textarea:focus {
+    border-color: #5145cd;
+    box-shadow: 0 0 0 3px #5145cd20;
+}
+
+.input-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    margin-top: 18px;
+    gap: 10px;
+}
+
+.task-status {
+    margin-top: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #5145cd;
+}
+
+.task-status[data-kind="error"] {
+    color: #a12626;
+}
+
+.task-status[data-kind="demo"] {
+    color: #705600;
+}
+
+.task-status[data-kind="loading"]::before {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 8px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: taskStatusSpin .8s linear infinite;
+    vertical-align: -1px;
+}
+
+@keyframes taskStatusSpin {
+    to { transform: rotate(360deg); }
+}
+
+.guide-summary,
+.clarification-question {
+    margin: 10px 0 18px;
+    color: #686b7d;
+    line-height: 1.6;
+}
+
+button {
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.voice-btn {
+    background: #f0efff;
+    color: #5145cd;
+
+    padding: 12px 18px;
+    border: none;
+    border-radius: 9px;
+    font-weight: bold;
+}
+
+.start-btn {
+    background: #5145cd;
+    color: white;
+
+    padding: 13px 25px;
+    border: none;
+    border-radius: 9px;
+
+    font-weight: bold;
+    transition: 0.2s;
+}
+
+.start-btn:hover {
+    background: #3930a3;
+    transform: translateY(-2px);
+}
+
+
+/* Suggested Tasks */
+
+.suggestions {
+    margin-top: 25px;
+}
+
+.suggestions p {
+    color: #77798a;
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+.suggestion-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.suggestion {
+    background: white;
+    border: 1px solid #e5e5ed;
+
+    padding: 10px 13px;
+    border-radius: 30px;
+
+    font-size: 12px;
+    color: #444;
+    transition: 0.2s;
+}
+
+.suggestion:hover {
+    border-color: #5145cd;
+    color: #5145cd;
+}
+
+
+/* Right Illustration */
+
+.hero-illustration {
+    flex: 0.8;
+    min-width: 260px;
+    height: 350px;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    position: relative;
+}
+
+.illustration-circle {
+    width: 240px;
+    height: 240px;
+
+    background: linear-gradient(135deg, #dedbff, #aaa2ff);
+
+    border-radius: 50%;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.illustration-icon {
+    font-size: 100px;
+}
+
+.floating-card {
+    position: absolute;
+
+    background: white;
+    padding: 14px 18px;
+
+    border-radius: 12px;
+
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.09);
+
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.card-one {
+    top: 20px;
+    right: 0;
+}
+
+.card-two {
+    bottom: 65px;
+    left: -5px;
+}
+
+.card-three {
+    bottom: 0;
+    right: 0;
+}
+
+
+/* How It Works Section */
+
+.how-section {
+    padding: 75px 10%;
+    background: white;
+    text-align: center;
+}
+
+.how-section h2 {
+    font-size: 34px;
+    margin-bottom: 12px;
+}
+
+.section-description {
+    color: #77798a;
+    margin-bottom: 45px;
+}
+
+.steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 25px;
+}
+
+.step-card {
+    padding: 30px 20px;
+
+    background: #f8f8ff;
+    border-radius: 16px;
+}
+
+.step-icon {
+    font-size: 40px;
+    margin-bottom: 15px;
+}
+
+.step-card h3 {
+    margin-bottom: 12px;
+}
+
+.step-card p {
+    color: #77798a;
+    line-height: 1.6;
+    font-size: 14px;
+}
+
+
+/* Mobile Responsive Design */
+
+@media (max-width: 850px) {
+
+    .hero {
+        flex-direction: column;
+        padding: 50px 6%;
+    }
+
+    .hero-illustration {
+        width: 100%;
+    }
+
+    .steps {
+        grid-template-columns: 1fr;
+    }
+
+    .navbar {
+        padding: 18px 5%;
+    }
+
+}
+
+@media (max-width: 480px) {
+
+    .nav-link {
+        display: none;
+    }
+
+    .input-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .hero-illustration {
+        transform: scale(0.85);
+    }
+
+}
+
+
+
+
+
+/* Guided Experience */
+
+.guide-panel {
+    display: none;
+    background: #f0efff;
+    padding: 65px 10%;
+}
+
+.guide-content {
+    max-width: 750px;
+    margin: auto;
+    background: white;
+    padding: 35px;
+    border-radius: 20px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+}
+
+.guide-content h2 {
+    font-size: 32px;
+    margin-bottom: 15px;
+}
+
+.guide-task {
+    color: #77798a;
+    margin-bottom: 25px;
+}
+
+.progress-bar {
+    height: 9px;
+    background: #e8e7f3;
+    border-radius: 20px;
+    overflow: hidden;
+    margin-bottom: 15px;
+}
+
+.progress-fill {
+    height: 100%;
+    width: 25%;
+    background: #5145cd;
+    transition: width 0.3s;
+}
+
+.step-count {
+    color: #77798a;
+    font-size: 13px;
+    margin-bottom: 20px;
+}
+
+.instruction-box {
+    background: #f8f8ff;
+    padding: 30px;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    min-height: 120px;
+    margin-bottom: 25px;
+}
+
+.step-number {
+    min-width: 45px;
+    height: 45px;
+    background: #5145cd;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+}
+
+.instruction-text {
+    font-size: 19px;
+    line-height: 1.5;
+}
+
+.guide-buttons {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+
+    .guide-panel {
+        padding: 35px 5%;
+    }
+
+    .guide-content {
+        padding: 22px;
+    }
+
+    .guide-buttons {
+        flex-wrap: wrap;
+    }
+
+}
+
+/* Interactive simulated student portal */
+.visual-guide { max-width: 1250px; margin: auto; }
+.visual-heading { margin-bottom: 24px; }
+.visual-heading h2 { font-size: 32px; margin-bottom: 10px; }
+.simulation-note { display: inline-block; margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: #fff7df; color: #674900; font-size: 13px; }
+.guide-layout { display: grid; grid-template-columns: 1.7fr .8fr; gap: 25px; align-items: start; }
+.portal { background: white; border: 1px solid #e4e4ee; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,.06); }
+.portal-header { background: #343078; color: white; padding: 20px; display: flex; justify-content: space-between; gap: 10px; }
+.portal-header span { font-size: 12px; }
+.portal-body { display: grid; grid-template-columns: 180px 1fr; min-height: 440px; }
+.portal-sidebar { background: #f5f5fa; padding: 20px 12px; }
+.portal-sidebar p { font-size: 11px; color: #777; margin: 8px; }
+.portal-option { display: block; width: 100%; padding: 13px 10px; margin: 8px 0; text-align: left; background: transparent; border: 0; border-radius: 8px; font-size: 13px; color: #444; }
+.portal-option:hover { background: #e9e7ff; }
+.portal-main { padding: 25px 20px; }
+.portal-main h3 { margin-bottom: 10px; }
+.portal-main > p { color: #777; font-size: 13px; margin-bottom: 25px; }
+.document-card { border: 1px solid #e6e6ed; padding: 15px; border-radius: 12px; display: flex; align-items: center; gap: 12px; margin-bottom: 15px; }
+.document-icon { font-size: 28px; }
+.document-card strong { font-size: 13px; }
+.document-card p { color: #777; font-size: 11px; margin-top: 5px; }
+.portal-action { margin-left: auto; padding: 9px 12px; background: #f0efff; color: #5145cd; border: 0; border-radius: 7px; font-size: 12px; }
+.receipt-box { display: none; padding: 20px; border: 1px solid #d9d6ff; background: #f8f7ff; border-radius: 12px; margin-top: 20px; }
+.receipt-visible { display: block; }
+.receipt-box p { font-size: 13px; color: #555; margin: 12px 0; }
+.download-action { background: #5145cd; color: white; border: 0; padding: 12px 15px; border-radius: 8px; margin-top: 10px; }
+.active-target { outline: 3px solid #e5a000 !important; outline-offset: 3px; background: #fff2cc !important; color: #332500 !important; animation: highlightPulse 1.4s infinite; position: relative; z-index: 2; }
+@keyframes highlightPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(229,160,0,.4); } 50% { box-shadow: 0 0 0 9px rgba(229,160,0,0); } }
+.instruction-panel { background: white; padding: 25px; border-radius: 16px; border: 1px solid #e6e6ed; box-shadow: 0 8px 30px rgba(0,0,0,.05); position: sticky; top: 20px; }
+.raasta-avatar { font-size: 38px; margin-bottom: 15px; }
+.instruction-panel h3 { font-size: 19px; line-height: 1.6; margin: 20px 0; }
+.visual-navigation { display: flex; justify-content: space-between; gap: 10px; margin-top: 20px; }
+.visual-navigation button { flex: 1; }
+.help-hint { color: #777; font-size: 12px; line-height: 1.5; margin-top: 20px; }
+#portalFeedback { color: #5145cd; font-size: 13px; margin-top: 12px; line-height: 1.5; }
+@media (max-width: 850px) { .guide-layout { grid-template-columns: 1fr; } .instruction-panel { position: static; } }
+@media (max-width: 550px) { .portal-body { grid-template-columns: 1fr; } .portal-sidebar { display: flex; flex-wrap: wrap; align-items: center; } .portal-sidebar p { width: 100%; } .portal-option { width: auto; } .document-card { flex-wrap: wrap; } .portal-header { flex-wrap: wrap; } }
