@@ -10,10 +10,19 @@ const startBtn = document.getElementById("startBtn");
 const voiceBtn = document.getElementById("voiceBtn");
 const language = document.getElementById("language");
 let resumeGuideAtStep = 0;
+let activeRecognition = null;
+
+function setVoiceButtonLabel(listening = false, isHindi = language.value === "hi") {
+    const label = listening
+        ? (isHindi ? "सुन रहे हैं..." : "Listening...")
+        : (isHindi ? "बोलें" : "Speak");
+    voiceBtn.innerHTML = `🎤 <span id="voiceLabel">${label}</span>`;
+}
 
 // Translate the visible interface without changing the task text or speech voices.
 function applyPageLanguage() {
     const isHindi = language.value === "hi";
+    language.setAttribute("aria-label", isHindi ? "इंटरफ़ेस की भाषा" : "Interface language");
     const labels = isHindi ? {
         howLink: "कैसे काम करता है", heroTagline: "आपका व्यक्तिगत डिजिटल गाइड",
         heroTitle: "तकनीक होनी चाहिए", heroTitleAccent: "सबके लिए आसान।",
@@ -40,7 +49,7 @@ function applyPageLanguage() {
         howGuidedTitle: "You're guided", howGuidedDescription: "Follow each step at your own pace."
     };
     Object.entries(labels).forEach(([id, text]) => { document.getElementById(id).textContent = text; });
-    voiceBtn.innerHTML = isHindi ? "🎤 <span id=\"voiceLabel\">बोलें</span>" : "🎤 <span id=\"voiceLabel\">Speak</span>";
+    setVoiceButtonLabel(Boolean(activeRecognition), isHindi);
     taskInput.placeholder = isHindi
         ? "उदाहरण: मुझे कॉलेज की फीस की रसीद डाउनलोड करनी है..."
         : "Example: I want to download my college fee receipt...";
@@ -83,50 +92,69 @@ suggestions.forEach(button => {
 
 voiceBtn.addEventListener("click", function () {
 
+    if (activeRecognition) return;
+
     const SpeechRecognition =
         window.SpeechRecognition ||
         window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-        alert(language.value === "hi"
+        setTaskStatus(language.value === "hi"
             ? "इस ब्राउज़र में आवाज़ से लिखना उपलब्ध नहीं है। Chrome आज़माएँ।"
-            : "Voice input is not supported in this browser. Try Chrome.");
+            : "Voice input is not supported in this browser. Try Chrome.", "error");
         return;
     }
 
     const recognition = new SpeechRecognition();
+    const recognitionLanguage = language.value;
+    activeRecognition = recognition;
+    voiceBtn.disabled = true;
 
     recognition.lang =
-        language.value === "hi" ? "hi-IN" : "en-IN";
+        recognitionLanguage === "hi" ? "hi-IN" : "en-IN";
 
-    recognition.start();
-
-    voiceBtn.textContent = language.value === "hi" ? "🎤 सुन रहे हैं..." : "🎤 Listening...";
+    setVoiceButtonLabel(true, recognitionLanguage === "hi");
 
     recognition.onresult = function (event) {
 
         taskInput.value =
             event.results[0][0].transcript;
 
-        voiceBtn.textContent = language.value === "hi" ? "🎤 बोलें" : "🎤 Speak";
+        setTaskStatus("");
 
     };
 
-    recognition.onerror = function () {
-
-        voiceBtn.textContent = language.value === "hi" ? "🎤 बोलें" : "🎤 Speak";
-
-        alert(language.value === "hi"
-            ? "आपकी आवाज़ समझ नहीं आई। कृपया फिर से कोशिश करें।"
-            : "Could not recognize your voice. Please try again.");
+    recognition.onerror = function (event) {
+        const isHindi = recognitionLanguage === "hi";
+        if (activeRecognition === recognition) activeRecognition = null;
+        voiceBtn.disabled = false;
+        setVoiceButtonLabel(false, isHindi);
+        const message = event?.error === "not-allowed" || event?.error === "service-not-allowed"
+            ? (isHindi ? "आवाज़ से लिखने के लिए ब्राउज़र में माइक्रोफ़ोन की अनुमति दें।" : "Allow microphone access in your browser to use voice input.")
+            : event?.error === "no-speech"
+                ? (isHindi ? "कोई आवाज़ नहीं मिली। कृपया फिर से बोलें।" : "No speech was detected. Please try again.")
+                : (isHindi ? "आवाज़ समझ नहीं आई। कृपया फिर से कोशिश करें।" : "Could not recognize your voice. Please try again.");
+        setTaskStatus(message, "error");
 
     };
 
     recognition.onend = function () {
-
-        voiceBtn.textContent = language.value === "hi" ? "🎤 बोलें" : "🎤 Speak";
+        if (activeRecognition === recognition) activeRecognition = null;
+        voiceBtn.disabled = false;
+        setVoiceButtonLabel(false);
 
     };
+
+    try {
+        recognition.start();
+    } catch {
+        activeRecognition = null;
+        voiceBtn.disabled = false;
+        setVoiceButtonLabel(false);
+        setTaskStatus(recognitionLanguage === "hi"
+            ? "आवाज़ से लिखना शुरू नहीं हो सका। कृपया फिर से कोशिश करें।"
+            : "Voice input could not start. Please try again.", "error");
+    }
 
 });
 
@@ -562,6 +590,9 @@ function showGuide(task, plan = null, startingStep = 0) {
         next.textContent = currentStep === steps.length - 1 ? (isHindi ? "समाप्त ✓" : "Finish ✓") : (isHindi ? "अगला →" : "Next →");
         targetIds.forEach(id => guide.querySelector(`#${id}`).classList.remove("active-target"));
         guide.querySelector(`#${steps[currentStep].target}`).classList.add("active-target");
+        if (steps[currentStep].target === "portalDownload") {
+            guide.querySelector("#receiptBox").classList.add("receipt-visible");
+        }
         feedback.textContent = "";
     }
 

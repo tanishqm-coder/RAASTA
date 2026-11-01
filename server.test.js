@@ -95,6 +95,10 @@ async function startTestServer({
                 on(event, listener) { listeners.set(event, listener); return this; },
                 once(event, listener) { listeners.set(event, listener); return this; },
                 emit(event, ...args) { listeners.get(event)?.(...args); return true; },
+                sendFile(file) {
+                    readFile(file).then(content => this.end(content)).catch(reject);
+                    return this;
+                },
                 end(chunk = "") {
                     this.body = Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
                     this._header ||= `HTTP/1.1 ${this.statusCode} Test\r\n`;
@@ -251,6 +255,87 @@ test("HTTP 503 retries once and accepts a successful Gemini response", async t =
     assert.ok(logs.some(line => line.includes("retries=1 fallback=false")));
 });
 
+test("HTTP 429 daily free-tier quota exhaustion does not retry", async t => {
+    const quotaError = Object.assign(new Error("Rate limit exceeded for model gemini-3.8-flash. Free Tier limit: 20 requests per day."), {
+        name: "RateLimitError",
+        status: 429
+    });
+    const server = await startTestServer({ failure: quotaError, retryDelayMs: 5 });
+    t.after(server.close);
+
+    const startedAt = performance.now();
+    const response = await server.postTask("Download my college fee receipt.");
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.mode, "fallback");
+    assert.match(body.message, /free-tier daily quota has been reached/i);
+    assert.ok(performance.now() - startedAt < 500, "quota fallback should return without waiting for a retry");
+    assert.doesNotMatch(JSON.stringify(body), /rate limit exceeded|gemini-3\.8-flash|HTTP 429/i);
+    assert.equal(server.calls.length, 1);
+});
+
+test("HTTP 429 temporary rate limit can retry once", async t => {
+    const temporaryRateLimit = Object.assign(new Error("Too many requests. Please retry shortly."), {
+        name: "RateLimitError",
+        status: 429
+    });
+    const server = await startTestServer({
+        outcomes: [temporaryRateLimit, { output_text: JSON.stringify(plan()) }],
+        retryDelayMs: 5
+    });
+    t.after(server.close);
+
+    const response = await server.postTask("Download my college fee receipt.");
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.mode, "ai");
+    assert.equal(body.supported, true);
+    assert.equal(server.calls.length, 2);
+});
+
+test("daily quota exhaustion returns the safe local guide with allowlisted targets", async t => {
+    const quotaError = Object.assign(new Error("Daily request quota exhausted"), { status: 429 });
+    const server = await startTestServer({ failure: quotaError });
+    t.after(server.close);
+
+    const response = await server.postTask("Download my hostel fee receipt.");
+    const body = await response.json();
+    assert.equal(body.mode, "fallback");
+    assert.equal(body.supported, true);
+    assert.match(body.message, /continuing in local mode/i);
+    assert.deepEqual(body.steps.map(step => step.targetElementId), targets);
+    assert.equal(server.calls.length, 1);
+});
+
+test("unsupported task after quota exhaustion keeps clarification and no portal targets", async t => {
+    const quotaError = Object.assign(new Error("Daily request quota exhausted"), { status: 429 });
+    const server = await startTestServer({ failure: quotaError });
+    t.after(server.close);
+
+    const response = await server.postTask("Find my train ticket receipt.");
+    const body = await response.json();
+    assert.equal(body.mode, "fallback");
+    assert.equal(body.supported, false);
+    assert.match(body.message, /free-tier daily quota has been reached/i);
+    assert.match(body.clarifyingQuestion, /currently guides college, hostel, tuition, and semester fee receipts/i);
+    assert.deepEqual(body.steps, []);
+    assert.equal(server.calls.length, 1);
+});
+
+test("HTTP 429 with a future quota reset time does not retry", async t => {
+    const quotaError = Object.assign(new Error("Rate limit exceeded"), {
+        name: "RateLimitError",
+        status: 429,
+        details: [{ quotaResetTime: new Date(Date.now() + 60_000).toISOString() }]
+    });
+    const server = await startTestServer({ failure: quotaError, retryDelayMs: 5 });
+    t.after(server.close);
+
+    const response = await server.postTask("Download my college fee receipt.");
+    assert.equal((await response.json()).mode, "fallback");
+    assert.equal(server.calls.length, 1);
+});
+
 test("persistent HTTP 503 returns the safe local guide and logs fallback", async t => {
     const logs = [];
     const logger = { info: message => logs.push(message), warn: message => logs.push(message), error() {} };
@@ -383,6 +468,78 @@ test("missing API key uses demo mode without creating a Gemini client", async t 
     assert.equal(server.clientCreated, false);
 });
 
+test("local clarification asks which fee for generic payment proof and explains supported tasks", async t => {
+    const server = await startTestServer({ apiKey: "" });
+    t.after(server.close);
+
+    const ambiguous = await (await server.postTask("My money was deducted but I cannot find the receipt.")).json();
+    const unrelated = await (await server.postTask("Find my train ticket receipt.")).json();
+    const hindi = await (await server.postTask("पैसे कट गए हैं लेकिन भुगतान की रसीद नहीं मिल रही।", "hi")).json();
+    const hinglish = await (await server.postTask("Fees jama ho gayi hai, ab receipt kaise nikalu?")).json();
+    const otherWorkflow = await (await server.postTask("I want to learn how to use my phone.")).json();
+
+    assert.equal(ambiguous.supported, false);
+    assert.match(ambiguous.clarifyingQuestion, /Which fee did you pay—hostel, tuition, semester/i);
+    assert.equal(unrelated.supported, false);
+    assert.match(unrelated.clarifyingQuestion, /Raasta currently guides college, hostel, tuition, and semester fee receipts/i);
+    assert.equal(hindi.supported, false);
+    assert.match(hindi.clarifyingQuestion, /आपने कौन-सी फीस भरी थी/);
+    assert.equal(hinglish.supported, false);
+    assert.match(hinglish.clarifyingQuestion, /Aapne kaunsi fees pay ki thi/);
+    assert.equal(otherWorkflow.supported, false);
+    assert.match(otherWorkflow.clarifyingQuestion, /Is a fee receipt what you need/i);
+    for (const plan of [ambiguous, unrelated, hindi, hinglish, otherWorkflow]) assert.deepEqual(plan.steps, []);
+});
+
+test("all eight demo-readiness prompts make safe local decisions without calling Gemini", async t => {
+    const server = await startTestServer({ apiKey: "" });
+    t.after(server.close);
+    const cases = [
+        { task: "Hostel fees bhar di, receipt kahan milegi?", supported: true },
+        { task: "Paise kat gaye lekin payment ka proof nahi mil raha.", question: /Aapne kaunsi fees pay ki thi/i },
+        { task: "Maine semester fees jama kar di hai, ab receipt kaise download karun?", supported: true },
+        { task: "I paid my tuition fees. Where can I find the receipt?", supported: true },
+        { task: "मुझे हॉस्टल की फीस की रसीद डाउनलोड करनी है।", language: "hi", supported: true },
+        { task: "My money was deducted but I cannot find my payment confirmation.", question: /Which fee did you pay/i },
+        { task: "Mujhe apna exam result check karna hai.", question: /Raasta abhi simulated student portal/i },
+        { task: "College portal pe password kaise change karun?", question: /Raasta abhi simulated student portal/i }
+    ];
+
+    for (const item of cases) {
+        const response = await server.postTask(item.task, item.language || "en");
+        const body = await response.json();
+        assert.equal(response.status, 200, item.task);
+        assert.equal(body.supported, Boolean(item.supported), item.task);
+        if (item.supported) {
+            assert.equal(body.mode, "demo", item.task);
+            assert.deepEqual(body.steps.map(step => step.targetElementId), targets, item.task);
+        } else {
+            assert.match(body.clarifyingQuestion, item.question, item.task);
+            assert.deepEqual(body.steps, [], item.task);
+        }
+    }
+    assert.equal(server.clientCreated, false);
+    assert.equal(server.calls.length, 0);
+});
+
+test("all static frontend routes and health endpoint respond through Express", async t => {
+    const server = await startTestServer({ apiKey: "" });
+    t.after(server.close);
+
+    const routes = [
+        ["/", /<title>Raasta \| Technology Without Confusion<\/title>/],
+        ["/index.html", /id="taskInput"/],
+        ["/script.js", /function showGuide\(/],
+        ["/style.css", /\.guide-layout/]
+    ];
+    for (const [route, expected] of routes) {
+        const response = await server.request(route);
+        assert.equal(response.status, 200, route);
+        assert.match(response.body, expected, route);
+    }
+    assert.deepEqual(await (await server.request("/api/health")).json(), { ok: true, mode: "demo" });
+});
+
 test("health, request validation, and the existing three-target contract are preserved", async t => {
     const server = await startTestServer({ response: JSON.stringify(plan()) });
     t.after(server.close);
@@ -410,6 +567,8 @@ test("Gemini request uses structured output and logs API and total durations sep
     assert.equal(request.generation_config.max_output_tokens, 2048);
     assert.equal(request.response_format.mime_type, "application/json");
     assert.match(request.input, /hostel, tuition, semester, academic/);
+    assert.match(request.input, /document showing payment success/);
+    assert.match(request.input, /money deducted/);
     await new Promise(resolve => setImmediate(resolve));
     assert.match(logs[0], /total=\d+ms geminiApi=\d+ms/);
     const [, totalMs, apiMs] = logs[0].match(/total=(\d+)ms geminiApi=(\d+)ms/);
@@ -423,11 +582,25 @@ test("frontend regression: bilingual speech, guidance targets, and AI-plan resta
     assert.match(script, /window\.speechSynthesis/);
     assert.match(script, /hi-IN/);
     assert.match(script, /en-IN/);
+    assert.match(script, /if \(activeRecognition\) return/);
+    assert.match(script, /microphone access in your browser/);
+    assert.match(script, /language\.setAttribute\("aria-label"/);
+    assert.match(script, /Voice input is not supported in this browser/);
     assert.match(script, /showGuide\(task, plan, 0\)/);
+    assert.match(script, /previous\.onclick = \(\) => \{ if \(currentStep > 0\)/);
+    assert.match(script, /next\.onclick = advanceStep/);
+    assert.match(script, /if \(steps\[currentStep\]\.target === "portalDownload"\)[\s\S]*?receipt-visible/);
+    assert.match(script, /speakText\(steps\[currentStep\]\.instruction\)/);
+    assert.match(script, /if \(id === "portalReceipts"\)[\s\S]*?receipt-visible/);
+    assert.match(script, /This is a demo; no file was downloaded/);
+    assert.match(script, /No real file was downloaded/);
+    assert.match(script, /No real portal or file is used/);
     assert.match(script, /result\.mode === "fallback"/);
+    assert.match(script, /setTaskStatus\(result\.message/);
     assert.match(script, /GEMINI_API_KEY/);
     for (const target of targets) assert.ok(script.includes(target), `missing frontend target ${target}`);
     assert.match(html, /id="language"[\s\S]*value="hi"/);
+    assert.match(html, /id="language" aria-label="Interface language"/);
 });
 
 test("optional live Gemini hostel request reports actual API and backend timings", {
