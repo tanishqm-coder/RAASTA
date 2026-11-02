@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Raasta | Technology Without Confusion</title>
+    <title>Raasta | Your AI guide to navigating the digital world</title>
 
     <link rel="stylesheet" href="style.css">
 </head>
@@ -15,20 +15,58 @@
     <nav class="navbar">
 
         <div class="logo">
-            <span class="logo-icon">R</span>
+            <span class="logo-icon" aria-hidden="true">R</span>
             <span>raasta</span>
         </div>
 
         <div class="nav-right">
-            <select id="language">
+            <select id="language" aria-label="Interface language">
                 <option value="en">English</option>
                 <option value="hi">हिन्दी</option>
             </select>
+
+            <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="true">
+                <span id="themeIcon" class="theme-icon" aria-hidden="true">☾</span>
+                <span id="themeToggleLabel">Dark</span>
+            </button>
 
             <a href="#how-it-works" class="nav-link" id="howLink">How it works</a>
         </div>
 
     </nav>
+
+    <details class="accessibility-tools">
+        <summary id="accessibilitySummary">Accessibility settings</summary>
+        <div class="accessibility-controls">
+            <fieldset class="text-size-controls">
+                <legend id="textSizeLegend">Text size</legend>
+                <button id="textSizeNormal" type="button" aria-pressed="true">Normal</button>
+                <button id="textSizeLarge" type="button" aria-pressed="false">Large</button>
+                <button id="textSizeExtraLarge" type="button" aria-pressed="false">Extra large</button>
+            </fieldset>
+            <label class="contrast-control" for="contrastToggle">
+                <input id="contrastToggle" type="checkbox">
+                <span id="contrastLabel">High contrast</span>
+            </label>
+            <label class="speech-speed-control" for="speechSpeed">
+                <span id="speechSpeedLabel">Read-aloud speed</span>
+                <select id="speechSpeed" aria-label="Read-aloud speed">
+                    <option value="0.75">0.75×</option>
+                    <option value="0.85" selected>0.85×</option>
+                    <option value="1">1×</option>
+                    <option value="1.25">1.25×</option>
+                    <option value="1.5">1.5×</option>
+                </select>
+            </label>
+            <label class="guidance-mode-control" for="guidanceMode">
+                <span id="guidanceModeLabel">Guidance style</span>
+                <select id="guidanceMode" aria-label="Guidance style">
+                    <option value="beginner" selected>Beginner (detailed)</option>
+                    <option value="experienced">Experienced (concise)</option>
+                </select>
+            </label>
+        </div>
+    </details>
 
 
     <!-- Main Section -->
@@ -37,16 +75,17 @@
         <div class="hero-content">
 
             <div class="tagline">
-                ✨ <span id="heroTagline">YOUR PERSONAL DIGITAL GUIDE</span>
+                <span class="tagline-mark" aria-hidden="true"></span>
+                <span id="heroTagline">DIGITAL ACCESS, AT YOUR PACE</span>
             </div>
 
             <h1>
-                <span id="heroTitle" class="neutral-heading">Technology should be</span>
-                <span id="heroTitleAccent">easy for everyone.</span>
+                <span id="heroTitle" class="neutral-heading">Your AI guide to</span>
+                <span id="heroTitleAccent">navigating the digital world.</span>
             </h1>
 
             <p class="description">
-                <span id="heroDescription">Confused about using an app or website? Just tell us what you want to do. We'll guide you, one simple step at a time.</span>
+                <span id="heroDescription">Tell Raasta what you want to do. Follow clear visual and spoken steps, at a pace that works for you.</span>
             </p>
 
 
@@ -66,8 +105,8 @@
 
                 <div class="input-actions">
 
-                    <button id="voiceBtn" class="voice-btn">
-                        🎤 <span id="voiceLabel">Speak</span>
+                    <button id="voiceBtn" class="voice-btn" type="button" aria-pressed="false" aria-label="Speak a task">
+                        <span class="voice-glyph" aria-hidden="true">●</span><span id="voiceLabel">Speak</span>
                     </button>
 
                     <button id="startBtn" class="start-btn">
@@ -77,6 +116,19 @@
                 </div>
 
                 <p id="taskStatus" class="task-status" role="status" aria-live="polite" hidden></p>
+                <p id="entryExamples" class="entry-examples">Examples: “Find my fee receipt” · “मुझे ट्रेन बुक करनी है” · “Connect to Wi-Fi”</p>
+
+                <div class="demo-controls">
+                    <label class="demo-mode-toggle" for="demoModeToggle">
+                        <input id="demoModeToggle" type="checkbox" aria-describedby="demoModeDescription demoModeState">
+                        <span>
+                            <strong id="demoModeTitle">Demo Mode</strong>
+                            <small id="demoModeDescription">Use local guides without contacting Gemini.</small>
+                        </span>
+                    </label>
+                    <p id="demoModeState" class="demo-mode-state" aria-live="polite">Off — task requests use AI when configured.</p>
+                    <button id="demoResetBtn" class="demo-reset-btn" type="button">Reset demo</button>
+                </div>
 
             </div>
 
@@ -88,19 +140,24 @@
 
                 <div class="suggestion-buttons">
 
-                    <button class="suggestion"
-                        data-task="I want to book a train ticket">
-                        🚆 <span id="suggestionTrainLabel">Book a train ticket</span>
+                    <button class="suggestion" type="button"
+                        data-task="I want to download my fee receipt.">
+                        <span class="example-type">RECEIPT</span><span>I want to download my fee receipt.</span><span class="example-arrow" aria-hidden="true">↗</span>
                     </button>
 
-                    <button class="suggestion"
-                        data-task="I want to download a document">
-                        📄 <span id="suggestionDocumentLabel">Download a document</span>
+                    <button class="suggestion" type="button"
+                        data-task="Mujhe Jaipur se Delhi ki train book karni hai.">
+                        <span class="example-type">TRAIN</span><span>Mujhe Jaipur se Delhi ki train book karni hai.</span><span class="example-arrow" aria-hidden="true">↗</span>
                     </button>
 
-                    <button class="suggestion"
-                        data-task="I want to learn how to use my phone">
-                        📱 <span id="suggestionPhoneLabel">Learn smartphone basics</span>
+                    <button class="suggestion" type="button"
+                        data-task="I want to download my bonafide certificate.">
+                        <span class="example-type">DOCUMENT</span><span>I want to download my bonafide certificate.</span><span class="example-arrow" aria-hidden="true">↗</span>
+                    </button>
+
+                    <button class="suggestion" type="button"
+                        data-task="Mujhe Bluetooth on karna hai.">
+                        <span class="example-type">PHONE</span><span>Mujhe Bluetooth on karna hai.</span><span class="example-arrow" aria-hidden="true">↗</span>
                     </button>
 
                 </div>
@@ -110,25 +167,30 @@
         </div>
 
 
-        <!-- Right Side Illustration -->
-        <div class="hero-illustration">
-
-            <div class="illustration-circle">
-                <div class="illustration-icon">🧭</div>
+        <!-- Static product preview; the interactive workflow is created by script.js -->
+        <div class="hero-illustration" aria-label="Preview of Raasta's guided steps">
+            <div class="preview-orbit orbit-one" aria-hidden="true"></div>
+            <div class="preview-orbit orbit-two" aria-hidden="true"></div>
+            <div class="preview-window">
+                <div class="preview-window-bar" aria-hidden="true"><i></i><i></i><i></i><span>raasta / guide</span></div>
+                <div class="preview-content">
+                    <div class="preview-eyebrow"><span class="preview-live-dot"></span> STEP-BY-STEP GUIDANCE</div>
+                    <h2>Find your way through.</h2>
+                    <p class="preview-copy">A clear next step, whenever you need one.</p>
+                    <div class="preview-progress-meta"><span>YOUR PROGRESS</span><span>02 / 04</span></div>
+                    <div class="preview-progress"><span></span></div>
+                    <div class="preview-step">
+                        <span class="preview-step-number">02</span>
+                        <div><small>UP NEXT</small><strong id="cardWebsite">Open the right section</strong></div>
+                        <span class="preview-step-arrow" aria-hidden="true">→</span>
+                    </div>
+                    <div class="preview-footer">
+                        <span><span class="preview-language-dot"></span><span id="cardLanguage">English + हिन्दी</span></span>
+                        <span id="cardGuidance">Visual guidance</span>
+                    </div>
+                </div>
             </div>
-
-            <div class="floating-card card-one">
-                🌐 <span id="cardWebsite">Any website</span>
-            </div>
-
-            <div class="floating-card card-two">
-                🗣️ <span id="cardLanguage">Your language</span>
-            </div>
-
-            <div class="floating-card card-three">
-                👆 <span id="cardGuidance">Step-by-step guidance</span>
-            </div>
-
+            <div class="preview-note"><span class="note-check" aria-hidden="true">✓</span><span>Built for your pace</span></div>
         </div>
 
     </main>
@@ -137,7 +199,10 @@
     <!-- How It Works -->
     <section id="how-it-works" class="how-section">
 
-        <h2 id="howTitle">Simple as 1, 2, 3.</h2>
+        <div class="section-heading">
+            <p class="section-kicker">A MORE HUMAN WAY TO GET THINGS DONE</p>
+            <h2 id="howTitle">From “I need help” to “I’ve got this.”</h2>
+        </div>
 
         <p class="section-description">
             <span id="howDescription">You don't need to be a tech expert. We've got you covered.</span>
@@ -146,19 +211,19 @@
         <div class="steps">
 
             <div class="step-card">
-                <div class="step-icon">💬</div>
+                <div class="step-icon">01</div>
                 <h3 id="howTellTitle">Tell us</h3>
                 <p id="howTellDescription">Describe what you want to accomplish.</p>
             </div>
 
             <div class="step-card">
-                <div class="step-icon">🧠</div>
+                <div class="step-icon">02</div>
                 <h3 id="howUnderstandTitle">We understand</h3>
                 <p id="howUnderstandDescription">We break your task into simple instructions.</p>
             </div>
 
             <div class="step-card">
-                <div class="step-icon">🚀</div>
+                <div class="step-icon">03</div>
                 <h3 id="howGuidedTitle">You're guided</h3>
                 <p id="howGuidedDescription">Follow each step at your own pace.</p>
             </div>
