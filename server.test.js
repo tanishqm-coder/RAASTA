@@ -23,10 +23,12 @@ function plan(category = "fee_receipt", overrides = {}) {
 }
 
 const NEVER_RESOLVE = Symbol("never-resolve");
+const TEST_SARVAM_KEY = "synthetic-sarvam-test-key";
 
 async function startTestServer({
     apiKey = "test-key", model = "test-flash", response, failure, outcomes,
-    delayMs = 0, deadlineMs = 15_000, retryDelayMs = 250, logger, liveGemini = false
+    delayMs = 0, deadlineMs = 15_000, retryDelayMs = 250, logger, liveGemini = false,
+    fetchImpl, sarvamTimeoutMs
 } = {}) {
     const calls = [];
     const callOptions = [];
@@ -39,6 +41,8 @@ async function startTestServer({
         retryDelayMs,
         logger: appLogger
     };
+    if (fetchImpl) appOptions.fetchImpl = fetchImpl;
+    if (sarvamTimeoutMs !== undefined) appOptions.sarvamTimeoutMs = sarvamTimeoutMs;
     if (!liveGemini) {
         appOptions.createGeminiClient = options => {
             clientCreated = true;
@@ -124,8 +128,21 @@ async function startTestServer({
         get clientCreated() { return clientCreated; },
         close: async () => {},
         request: path => request("GET", path),
-        postTask: (task, language = "en") => request("POST", "/api/understand-task", { task, language })
+        postTask: (task, language = "en", options = {}) => request("POST", "/api/understand-task", { task, language, ...options }),
+        post: (url, body) => request("POST", url, body)
     };
+}
+
+async function withSarvamKey(key, callback) {
+    const previous = process.env.SARVAM_API_KEY;
+    if (key === null) delete process.env.SARVAM_API_KEY;
+    else process.env.SARVAM_API_KEY = key;
+    try {
+        return await callback();
+    } finally {
+        if (previous === undefined) delete process.env.SARVAM_API_KEY;
+        else process.env.SARVAM_API_KEY = previous;
+    }
 }
 
 test("AI false-negative on the reported hostel request uses the known safe guide", async t => {
@@ -178,6 +195,41 @@ test("Hinglish hostel request recovers from Gemini false-negative", async t => {
     assert.equal(body.supported, true);
     assert.equal(body.language, "hi");
     assert.deepEqual(body.steps.map(step => step.targetElementId), targets);
+});
+
+test("local fallback opens the safe guide for fee, hostel, and semester receipt speech variants", async t => {
+    const server = await startTestServer({ apiKey: null });
+    t.after(server.close);
+
+    const requests = [
+        "Mujhe free receipt download karni hai.",
+        "Maine hostel ki fees bhar di, receipt chahiye.",
+        "Hostel fee ka proof download karna hai.",
+        "College fees ki rasid chahiye.",
+        "Mujhe semester fees ki receipt chahiye.",
+        "मुझे हॉस्टल की फीस की रसीद डाउनलोड करनी है।"
+    ];
+    for (const task of requests) {
+        const response = await server.postTask(task, /[\u0900-\u097F]/u.test(task) ? "hi" : "en");
+        const body = await response.json();
+        assert.equal(body.supported, true, task);
+        assert.equal(body.task, task, "the transcript remains unchanged for display");
+        assert.deepEqual(body.steps.map(step => step.targetElementId), targets);
+    }
+});
+
+test("Gemini receives the contextual correction once while the response retains the original transcript", async t => {
+    const server = await startTestServer({ response: JSON.stringify(plan("unsupported")) });
+    t.after(server.close);
+
+    const original = "Mujhe free receipt download karni hai.";
+    const response = await server.postTask(original);
+    const body = await response.json();
+    assert.equal(server.calls.length, 1);
+    assert.match(server.calls[0].input, /Mujhe fee receipt download karni hai/);
+    assert.doesNotMatch(server.calls[0].input, /Mujhe free receipt download karni hai/);
+    assert.equal(body.supported, true);
+    assert.equal(body.task, original);
 });
 
 test("unrelated receipts remain unsupported even if Gemini proposes the supported workflow", async t => {
@@ -468,7 +520,7 @@ test("missing API key uses demo mode without creating a Gemini client", async t 
     assert.equal(server.clientCreated, false);
 });
 
-test("local clarification asks which fee for generic payment proof and explains supported tasks", async t => {
+test("local clarification asks which fee for generic payment proof and phone basics opens its tutorial picker", async t => {
     const server = await startTestServer({ apiKey: "" });
     t.after(server.close);
 
@@ -486,9 +538,11 @@ test("local clarification asks which fee for generic payment proof and explains 
     assert.match(hindi.clarifyingQuestion, /आपने कौन-सी फीस भरी थी/);
     assert.equal(hinglish.supported, false);
     assert.match(hinglish.clarifyingQuestion, /Aapne kaunsi fees pay ki thi/);
-    assert.equal(otherWorkflow.supported, false);
-    assert.match(otherWorkflow.clarifyingQuestion, /Is a fee receipt what you need/i);
-    for (const plan of [ambiguous, unrelated, hindi, hinglish, otherWorkflow]) assert.deepEqual(plan.steps, []);
+    assert.equal(otherWorkflow.supported, true);
+    assert.equal(otherWorkflow.category, "smartphone_basics");
+    assert.equal(otherWorkflow.topic, null);
+    assert.equal(otherWorkflow.steps[0].targetElementId, "phoneTutorialChoice");
+    for (const plan of [ambiguous, unrelated, hindi, hinglish]) assert.deepEqual(plan.steps, []);
 });
 
 test("all eight demo-readiness prompts make safe local decisions without calling Gemini", async t => {
@@ -501,8 +555,8 @@ test("all eight demo-readiness prompts make safe local decisions without calling
         { task: "I paid my tuition fees. Where can I find the receipt?", supported: true },
         { task: "मुझे हॉस्टल की फीस की रसीद डाउनलोड करनी है।", language: "hi", supported: true },
         { task: "My money was deducted but I cannot find my payment confirmation.", question: /Which fee did you pay/i },
-        { task: "Mujhe apna exam result check karna hai.", question: /Raasta abhi simulated student portal/i },
-        { task: "College portal pe password kaise change karun?", question: /Raasta abhi simulated student portal/i }
+        { task: "Mujhe apna exam result check karna hai.", supported: true, universal: true },
+        { task: "College portal pe password kaise change karun?", supported: true, universal: true }
     ];
 
     for (const item of cases) {
@@ -512,7 +566,11 @@ test("all eight demo-readiness prompts make safe local decisions without calling
         assert.equal(body.supported, Boolean(item.supported), item.task);
         if (item.supported) {
             assert.equal(body.mode, "demo", item.task);
-            assert.deepEqual(body.steps.map(step => step.targetElementId), targets, item.task);
+            if (item.universal) {
+                assert.equal(body.category, "universal_guidance", item.task);
+                assert.ok(body.steps.length >= 2, item.task);
+                assert.ok(body.steps.every(step => !Object.hasOwn(step, "targetElementId")), item.task);
+            } else assert.deepEqual(body.steps.map(step => step.targetElementId), targets, item.task);
         } else {
             assert.match(body.clarifyingQuestion, item.question, item.task);
             assert.deepEqual(body.steps, [], item.task);
@@ -522,12 +580,344 @@ test("all eight demo-readiness prompts make safe local decisions without calling
     assert.equal(server.calls.length, 0);
 });
 
+test("local demo mode returns safe plans for train, document, and smartphone requests in all input styles", async t => {
+    const server = await startTestServer({ apiKey: "" });
+    t.after(server.close);
+    const scenarios = [
+        { task: "I want to book a train ticket.", category: "train_booking", language: "en", expectedTargets: ["trainSource", "trainDestination", "trainDate", "trainSearch", "trainSelect", "trainPassenger", "trainReview", "bookingConfirm"] },
+        { task: "Mujhe Jaipur se Delhi ki train book karni hai.", category: "train_booking", language: "hi", source: "Jaipur", destination: "Delhi" },
+        { task: "How can I find trains between two cities?", category: "train_booking", language: "en" },
+        { task: "I want to download my bonafide certificate.", category: "document_download", language: "en", documentType: "bonafide" },
+        { task: "Mujhe apna document download karna hai.", category: "document_download", language: "hi", documentType: null },
+        { task: "How do I download my marksheet?", category: "document_download", language: "en", documentType: "marksheet" },
+        { task: "Teach me how to connect to Wi-Fi.", category: "smartphone_basics", language: "en", topic: "wifi" },
+        { task: "Mujhe Wi-Fi connect karna sikhao.", category: "smartphone_basics", language: "hi", topic: "wifi" },
+        { task: "How do I increase my phone brightness?", category: "smartphone_basics", language: "en", topic: "brightness" },
+        { task: "How do I turn on Bluetooth?", category: "smartphone_basics", language: "en", topic: "bluetooth" },
+        { task: "Turn Bluetooth off.", category: "smartphone_basics", language: "en", topic: "bluetooth" },
+        { task: "Mujhe Bluetooth on karna hai.", category: "smartphone_basics", language: "hi", topic: "bluetooth" },
+        { task: "Bluetooth chalu karo.", category: "smartphone_basics", language: "hi", topic: "bluetooth" },
+        { task: "Bluetooth band karna hai.", category: "smartphone_basics", language: "hi", topic: "bluetooth" },
+        { task: "मुझे Bluetooth चालू करना है।", category: "smartphone_basics", language: "hi", topic: "bluetooth" },
+        { task: "Teach me how to use my smartphone.", category: "smartphone_basics", language: "en", topic: null }
+    ];
+    for (const scenario of scenarios) {
+        const body = await (await server.postTask(scenario.task, scenario.language)).json();
+        assert.equal(body.supported, true, scenario.task);
+        assert.equal(body.category, scenario.category, scenario.task);
+        assert.equal(body.mode, "demo", scenario.task);
+        if (scenario.topic !== undefined) assert.equal(body.topic, scenario.topic, scenario.task);
+        if (scenario.documentType !== undefined) assert.equal(body.documentType, scenario.documentType, scenario.task);
+        if (scenario.source) assert.equal(body.source, scenario.source, scenario.task);
+        if (scenario.destination) assert.equal(body.destination, scenario.destination, scenario.task);
+        if (scenario.expectedTargets) assert.deepEqual(body.steps.map(step => step.targetElementId), scenario.expectedTargets);
+        assert.ok(body.steps.length > 0, scenario.task);
+    }
+    assert.equal(server.clientCreated, false);
+    assert.equal(server.calls.length, 0);
+});
+
+test("explicit Demo Mode uses the local classifier for all four workflows without creating a Gemini client", async t => {
+    const server = await startTestServer({ apiKey: "configured-test-key", response: new Error("Gemini must not be called in Demo Mode") });
+    t.after(server.close);
+    const cases = [
+        { task: "I want to download my fee receipt.", language: "en", category: "fee_receipt", target: "portalDocuments" },
+        { task: "Mujhe Jaipur se Delhi ki train book karni hai.", language: "hi", category: "train_booking", target: "trainSource" },
+        { task: "I want to download my bonafide certificate.", language: "en", category: "document_download", target: "documentOpen" },
+        { task: "Mujhe Bluetooth on karna hai.", language: "hi", category: "smartphone_basics", target: "phoneSettings" },
+        { task: "मुझे हॉस्टल की फीस की रसीद डाउनलोड करनी है।", language: "hi", category: "fee_receipt", target: "portalDocuments" }
+    ];
+
+    for (const item of cases) {
+        const response = await server.postTask(item.task, item.language, { demoMode: true });
+        const body = await response.json();
+        assert.equal(response.status, 200, item.task);
+        assert.equal(body.mode, "demo", item.task);
+        assert.equal(body.supported, true, item.task);
+        assert.equal(body.category, item.category, item.task);
+        assert.equal(body.steps[0].targetElementId, item.target, item.task);
+        assert.ok(body.steps.length > 0, item.task);
+    }
+    assert.equal(server.clientCreated, false);
+    assert.equal(server.calls.length, 0);
+});
+
+test("Demo Mode creates target-free universal guides for common digital tasks in English and Hinglish", async t => {
+    const server = await startTestServer({ apiKey: "configured-test-key", response: new Error("Gemini must not be called in Demo Mode") });
+    t.after(server.close);
+    const cases = [
+        ["I want to turn on my PS5.", "en", /power-marked button/i],
+        ["Mera PS5 chalu kaise karu?", "hi", /power निशान/i],
+        ["Mujhe PS 5 chalu karna hai.", "hi", /power निशान/i],
+        ["Connect my PS5 controller.", "en", /PS button/i],
+        ["I want to connect my phone to Bluetooth headphones.", "en", /pairing mode/i],
+        ["Connect Bluetooth headphones to my laptop.", "en", /Windows.*Mac/],
+        ["Mujhe laptop par Bluetooth headphones connect karne hain.", "hi", /Windows.*Mac/],
+        ["Connect bluetooh headphones to my laptop.", "en", /Windows.*Mac/],
+        ["How do I connect my laptop to a TV?", "en", /Input\/Source/],
+        ["Turn on my TV.", "en", /working outlet/i],
+        ["How do I switch on my television?", "en", /physical button/i],
+        ["Mujhe TV chalu karni hai.", "hi", /Power निशान/],
+        ["muje tv chalu karni hai", "hi", /Power निशान/],
+        ["TV on kaise karu?", "hi", /एक बार दबाएँ/],
+        ["टीवी चालू करनी है।", "hi", /काम कर रहे socket/],
+        ["How do I turn off my TV?", "en", /standby/i],
+        ["TV band karni hai.", "hi", /standby light/i],
+        ["How do I change the HDMI input?", "en", /Input\/Source/],
+        ["Connect my phone to my TV.", "en", /Not every phone/],
+        ["How do I take a screenshot on Windows?", "en", /Windows\+Shift\+S/i],
+        ["Mujhe apne phone ka hotspot on karna hai.", "hi", /Hotspot चालू/i],
+        ["Turn on my phone hotspot.", "en", /Personal Hotspot/i],
+        ["How do I connect my laptop to Wi-Fi?", "en", /network/i]
+    ];
+    for (const [task, language, expected] of cases) {
+        const body = await (await server.postTask(task, language, { demoMode: true })).json();
+        assert.equal(body.supported, true, task);
+        assert.equal(body.category, "universal_guidance", task);
+        assert.equal(body.mode, "demo", task);
+        assert.ok(body.steps.length >= 2 && body.steps.length <= 8, task);
+        assert.ok(body.steps.some(step => expected.test(step.instruction)), task);
+        assert.ok(body.steps.every(step => !Object.hasOwn(step, "targetElementId")), task);
+    }
+    assert.equal(server.calls.length, 0);
+    assert.equal(server.clientCreated, false);
+});
+
+test("TV local guides work without Gemini and after quota exhaustion", async t => {
+    const demoServer = await startTestServer({ apiKey: "configured-test-key", failure: new Error("Gemini must not be called") });
+    t.after(demoServer.close);
+    const demo = await (await demoServer.postTask("Turn on my TV.", "en", { demoMode: true })).json();
+    assert.equal(demo.supported, true);
+    assert.equal(demo.mode, "demo");
+    assert.equal(demo.category, "universal_guidance");
+    assert.equal(demoServer.calls.length, 0);
+
+    const noKeyServer = await startTestServer({ apiKey: "" });
+    t.after(noKeyServer.close);
+    const noKey = await (await noKeyServer.postTask("Mujhe TV chalu karni hai.", "hi")).json();
+    assert.equal(noKey.supported, true);
+    assert.equal(noKey.mode, "demo");
+    assert.match(noKey.steps[1].instruction, /remote|physical/i);
+    assert.equal(noKeyServer.clientCreated, false);
+
+    const quotaServer = await startTestServer({ failure: Object.assign(new Error("daily quota exhausted"), { status: 429 }) });
+    t.after(quotaServer.close);
+    const fallback = await (await quotaServer.postTask("How do I change the HDMI input?", "en")).json();
+    assert.equal(fallback.supported, true);
+    assert.equal(fallback.mode, "fallback");
+    assert.equal(fallback.category, "universal_guidance");
+    assert.ok(fallback.steps.some(step => /Input\/Source/i.test(step.instruction)));
+    assert.ok(fallback.steps.every(step => !Object.hasOwn(step, "targetElementId")));
+    assert.equal(quotaServer.calls.length, 1, "daily quota exhaustion is not retried");
+});
+
+test("universal Gemini output is validated, target-free and remains separate from specialized workflow targets", async t => {
+    const universal = {
+        task: "How do I turn on my PS5?", category: "universal_guidance", language: "en",
+        instruction: "General guidance for powering on a PS5.", steps: [
+            { title: "Check power", instruction: "Check that the console is connected to power." },
+            { title: "Find the button", instruction: "Look for the power-marked button along the front edge; position varies by model." }
+        ], clarifyingQuestion: "", device: "PlayStation 5"
+    };
+    const server = await startTestServer({ response: JSON.stringify(universal) });
+    t.after(server.close);
+    const body = await (await server.postTask(universal.task, "en")).json();
+    assert.equal(body.supported, true);
+    assert.equal(body.category, "universal_guidance");
+    assert.equal(body.mode, "ai");
+    assert.deepEqual(body.steps.map(step => step.title), ["Check power", "Find the button"]);
+    assert.ok(body.steps.every(step => !Object.hasOwn(step, "targetElementId")));
+    assert.equal(server.calls.length, 1);
+    assert.deepEqual(server.calls[0].response_format.schema.properties.category.enum.includes("universal_guidance"), true);
+
+    const maliciousServer = await startTestServer({ response: JSON.stringify({ ...universal, steps: universal.steps.map(step => ({ ...step, targetElementId: "madeUpControl" })) }) });
+    t.after(maliciousServer.close);
+    const rejected = await (await maliciousServer.postTask(universal.task, "en")).json();
+    assert.equal(rejected.supported, false);
+    assert.deepEqual(rejected.steps, []);
+});
+
+test("Gemini can generate general guidance for a digital task without a local canned guide", async t => {
+    const task = "How do I turn off email notifications in my browser?";
+    const response = {
+        task, category: "universal_guidance", language: "en", instruction: "General browser guidance; menu labels vary.",
+        steps: [
+            { title: "Open browser settings", instruction: "Open the browser settings menu." },
+            { title: "Find notification permissions", instruction: "Search settings for site notifications and review which sites can send them." },
+            { title: "Change only the needed site", instruction: "Turn off notifications for the selected site, then verify the change." }
+        ], clarifyingQuestion: "", device: "browser"
+    };
+    const server = await startTestServer({ response: JSON.stringify(response) });
+    t.after(server.close);
+    const body = await (await server.postTask(task, "en")).json();
+    assert.equal(body.supported, true);
+    assert.equal(body.category, "universal_guidance");
+    assert.equal(body.mode, "ai");
+    assert.equal(body.device, "browser");
+    assert.equal(body.steps.length, 3);
+    assert.ok(body.steps.every(step => !Object.hasOwn(step, "targetElementId")));
+});
+
+test("Gemini failures use known universal local guides and clarify platform-dependent requests", async t => {
+    const server = await startTestServer({ apiKey: "configured-test-key", failure: Object.assign(new Error("service unavailable"), { status: 503 }), retryDelayMs: 2 });
+    t.after(server.close);
+    const guide = await (await server.postTask("I want to turn on my PS5.", "en")).json();
+    assert.equal(guide.supported, true);
+    assert.equal(guide.category, "universal_guidance");
+    assert.equal(guide.mode, "fallback");
+    assert.match(guide.message, /safe local guide/i);
+    assert.ok(guide.steps.every(step => !Object.hasOwn(step, "targetElementId")));
+    const clarification = await (await server.postTask("How do I turn on location services?", "en")).json();
+    assert.equal(clarification.supported, false);
+    assert.match(clarification.clarifyingQuestion, /which device and system/i);
+});
+
+test("universal guides remain useful after quota exhaustion and deadline expiry, while unknown tasks clarify", async t => {
+    const quota = Object.assign(new Error("daily quota exhausted"), { status: 429 });
+    const quotaServer = await startTestServer({ failure: quota, retryDelayMs: 2 });
+    t.after(quotaServer.close);
+    const quotaGuide = await (await quotaServer.postTask("Connect my PS5 controller.", "en")).json();
+    assert.equal(quotaGuide.supported, true);
+    assert.equal(quotaGuide.mode, "fallback");
+    assert.equal(quotaGuide.category, "universal_guidance");
+    assert.match(quotaGuide.message, /quota/i);
+    assert.ok(quotaGuide.steps.every(step => !Object.hasOwn(step, "targetElementId")));
+    assert.equal(quotaServer.calls.length, 1, "daily quota exhaustion is not retried");
+
+    const timeoutServer = await startTestServer({ response: NEVER_RESOLVE, deadlineMs: 25 });
+    t.after(timeoutServer.close);
+    const timeoutGuide = await (await timeoutServer.postTask("Connect Bluetooth headphones to my laptop.", "en")).json();
+    assert.equal(timeoutGuide.supported, true);
+    assert.equal(timeoutGuide.mode, "fallback");
+    assert.equal(timeoutGuide.category, "universal_guidance");
+    assert.ok(timeoutGuide.steps.some(step => /Windows.*Mac/.test(step.instruction)));
+
+    const unknown = await (await timeoutServer.postTask("How do I change my laptop notification settings?", "en")).json();
+    assert.equal(unknown.supported, false);
+    assert.deepEqual(unknown.steps, []);
+    assert.ok(unknown.clarifyingQuestion?.trim(), "unknown device-specific tasks should receive a useful clarification");
+});
+
+test("a Gemini unsupported classification cannot override a known safe universal fallback", async t => {
+    const server = await startTestServer({ response: JSON.stringify({ ...plan("unsupported"), clarifyingQuestion: "Which feature do you mean?" }) });
+    t.after(server.close);
+    const body = await (await server.postTask("I want to turn on my PS5.", "en")).json();
+    assert.equal(body.supported, true);
+    assert.equal(body.category, "universal_guidance");
+    assert.equal(body.mode, "fallback");
+    assert.match(body.message, /Gemini did not recognize this task/i);
+    assert.ok(body.steps.every(step => !Object.hasOwn(step, "targetElementId")));
+});
+
+test("Gemini general guidance remains target-free and adds caution for security changes", async t => {
+    const response = {
+        task: "How do I change my Wi-Fi password?", category: "universal_guidance", language: "en",
+        instruction: "Change the password in your router settings.",
+        steps: [
+            { title: "Open router settings", instruction: "Open the router’s official settings app or instructions." },
+            { title: "Choose a password", instruction: "Use a strong unique password." }
+        ], clarifyingQuestion: "", device: "router"
+    };
+    const server = await startTestServer({ response: JSON.stringify(response) });
+    t.after(server.close);
+    const body = await (await server.postTask(response.task, "en")).json();
+    assert.equal(body.supported, true);
+    assert.equal(body.category, "universal_guidance");
+    assert.match(body.steps[0].instruction, /may affect .*security/i);
+    assert.ok(body.steps.every(step => !Object.hasOwn(step, "targetElementId")));
+});
+
+test("explicit Demo Mode keeps ambiguity and unsupported tasks out of the workflow allowlist", async t => {
+    const server = await startTestServer({ apiKey: "configured-test-key", response: new Error("Gemini must not be called in Demo Mode") });
+    t.after(server.close);
+
+    const ambiguous = await (await server.postTask("My money was deducted but I cannot find the receipt.", "en", { demoMode: true })).json();
+    const unsupported = await (await server.postTask("Find my shopping receipt.", "en", { demoMode: true })).json();
+    assert.equal(ambiguous.mode, "demo");
+    assert.equal(ambiguous.supported, false);
+    assert.match(ambiguous.clarifyingQuestion, /Which fee did you pay/i);
+    assert.deepEqual(ambiguous.steps, []);
+    assert.equal(unsupported.supported, false);
+    assert.deepEqual(unsupported.steps, []);
+    assert.equal(server.clientCreated, false);
+    assert.equal(server.calls.length, 0);
+});
+
+test("deactivating explicit Demo Mode returns task understanding to the configured AI path", async t => {
+    const server = await startTestServer({ response: JSON.stringify(plan("fee_receipt")) });
+    t.after(server.close);
+
+    const response = await server.postTask("Download my college fee receipt.", "en", { demoMode: false });
+    const body = await response.json();
+    assert.equal(body.mode, "ai");
+    assert.equal(body.supported, true);
+    assert.equal(server.calls.length, 1);
+});
+
+test("ambiguous and unsupported workflow requests ask clarification or stay outside the allowlist", async t => {
+    const server = await startTestServer({ apiKey: "" });
+    t.after(server.close);
+    const cases = [
+        { task: "Which document should I get?", question: /which document/i },
+        { task: "My phone settings are not working.", question: /Wi-Fi.*brightness.*Bluetooth/i },
+        { task: "I need to travel by train.", question: /cities/i },
+        { task: "Book a flight ticket to Delhi.", question: /not bus or flight bookings/i },
+        { task: "How do I hack the neighbor's Wi-Fi password?", question: /Wi-Fi.*brightness.*Bluetooth/i },
+        { task: "What is the price of a Bluetooth speaker?", question: /Wi-Fi.*brightness.*Bluetooth/i },
+        { task: "Find my train ticket receipt.", question: /simulated student portal/i }
+    ];
+    for (const scenario of cases) {
+        const body = await (await server.postTask(scenario.task)).json();
+        assert.equal(body.supported, false, scenario.task);
+        assert.deepEqual(body.steps, [], scenario.task);
+        assert.match(body.clarifyingQuestion, scenario.question, scenario.task);
+    }
+});
+
+test("Gemini transient failure and daily quota still activate the local new-workflow plans", async t => {
+    for (const [failure, task, expectedCategory, expectedMode] of [
+        [Object.assign(new Error("service unavailable"), { status: 503 }), "I want to download my bonafide certificate.", "document_download", "fallback"],
+        [Object.assign(new Error("daily quota exhausted"), { status: 429 }), "Teach me how to connect to Wi-Fi.", "smartphone_basics", "fallback"],
+        [Object.assign(new Error("daily quota exhausted"), { status: 429 }), "Mujhe Bluetooth on karna hai.", "smartphone_basics", "fallback"],
+        [Object.assign(new Error("service unavailable"), { status: 503 }), "Bluetooth band karna hai.", "smartphone_basics", "fallback"]
+    ]) {
+        const server = await startTestServer({ failure, retryDelayMs: 2 });
+        t.after(server.close);
+        const body = await (await server.postTask(task)).json();
+        assert.equal(body.supported, true, task);
+        assert.equal(body.category, expectedCategory, task);
+        assert.equal(body.mode, expectedMode, task);
+        assert.ok(body.steps.length > 0, task);
+        if (/bluetooth/i.test(task)) {
+            assert.equal(body.topic, "bluetooth", task);
+            assert.deepEqual(body.steps.map(step => step.targetElementId), ["phoneSettings", "phoneBluetooth", "phoneToggle", "phoneBluetoothDone"], task);
+        }
+    }
+});
+
+test("Gemini plans for new workflows cannot introduce targets outside that workflow sequence", async t => {
+    const newWorkflowPlan = {
+        task: "Download my marksheet",
+        category: "document_download",
+        language: "en",
+        instruction: "Open documents.",
+        steps: ["documentOpen", "inventedDownload", "documentSample", "documentPreview", "documentDownload"].map(targetElementId => ({ instruction: "Use the highlighted control.", targetElementId })),
+        clarifyingQuestion: ""
+    };
+    const server = await startTestServer({ response: JSON.stringify(newWorkflowPlan) });
+    t.after(server.close);
+    const body = await (await server.postTask("How do I download my marksheet?")).json();
+    assert.equal(body.supported, false);
+    assert.deepEqual(body.steps, []);
+    assert.doesNotMatch(JSON.stringify(body), /inventedDownload/);
+});
+
 test("all static frontend routes and health endpoint respond through Express", async t => {
     const server = await startTestServer({ apiKey: "" });
     t.after(server.close);
 
     const routes = [
-        ["/", /<title>Raasta \| Technology Without Confusion<\/title>/],
+        ["/", /<title>Raasta \| Your AI guide to navigating the digital world<\/title>/],
         ["/index.html", /id="taskInput"/],
         ["/script.js", /function showGuide\(/],
         ["/style.css", /\.guide-layout/]
@@ -566,7 +956,10 @@ test("Gemini request uses structured output and logs API and total durations sep
     assert.equal(request.generation_config.thinking_level, "low");
     assert.equal(request.generation_config.max_output_tokens, 2048);
     assert.equal(request.response_format.mime_type, "application/json");
-    assert.match(request.input, /hostel, tuition, semester, academic/);
+    assert.match(request.input, /fee_receipt \(college\/hostel\/tuition\/semester fee receipt only/);
+    assert.match(request.input, /train_booking/);
+    assert.match(request.input, /document_download/);
+    assert.match(request.input, /smartphone_basics/);
     assert.match(request.input, /document showing payment success/);
     assert.match(request.input, /money deducted/);
     await new Promise(resolve => setImmediate(resolve));
@@ -574,6 +967,111 @@ test("Gemini request uses structured output and logs API and total durations sep
     const [, totalMs, apiMs] = logs[0].match(/total=(\d+)ms geminiApi=(\d+)ms/);
     assert.ok(Number(apiMs) >= 25, `fake Gemini delay should be reflected, got ${apiMs}ms`);
     assert.ok(Number(totalMs) >= Number(apiMs));
+});
+
+test("Sarvam Hindi TTS uses the configured Bulbul persona and returns playable MP3 bytes", async t => {
+    await withSarvamKey(TEST_SARVAM_KEY, async () => {
+        let call;
+        const server = await startTestServer({
+            apiKey: "",
+            fetchImpl: async (url, options) => {
+                call = { url, options };
+                return new Response(JSON.stringify({ audios: [Buffer.from("mock-mp3-audio").toString("base64")] }), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                });
+            }
+        });
+        t.after(server.close);
+
+        const text = "नमस्ते! Documents खोलें और Fee Receipts चुनें।";
+        const response = await server.post("/api/speech/hindi", { text, languageCode: "hi-IN" });
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("content-type"), "audio/mpeg");
+        assert.equal(response.headers.get("cache-control"), "no-store");
+        assert.equal(Buffer.from(response.body, "latin1").toString(), "mock-mp3-audio");
+        assert.equal(call.url, "https://api.sarvam.ai/text-to-speech");
+        const requestBody = JSON.parse(call.options.body);
+        assert.deepEqual({ model: requestBody.model, speaker: requestBody.speaker, language_code: requestBody.language_code }, {
+            model: "bulbul:v4-flash",
+            speaker: "aparna_hi_customer",
+            language_code: "hi-IN"
+        });
+        assert.equal(requestBody.enable_preprocessing, true);
+        assert.equal(requestBody.output_audio_codec, "mp3");
+        assert.equal(requestBody.text, text);
+        assert.equal(call.options.headers["api-subscription-key"], TEST_SARVAM_KEY);
+        assert.equal(call.options.headers.Authorization, undefined);
+    });
+});
+
+test("Sarvam Hindi TTS reports a missing key without contacting the API", async t => {
+    await withSarvamKey(null, async () => {
+        let called = false;
+        const server = await startTestServer({ apiKey: "", fetchImpl: async () => { called = true; } });
+        t.after(server.close);
+        const response = await server.post("/api/speech/hindi", { text: "नमस्ते", languageCode: "hi-IN" });
+        assert.equal(response.status, 503);
+        assert.match((await response.json()).error, /not configured/i);
+        assert.equal(called, false);
+    });
+});
+
+test("Sarvam TTS validates text, language, and the 2,500-character limit before fetching", async t => {
+    await withSarvamKey(TEST_SARVAM_KEY, async () => {
+        let called = false;
+        const server = await startTestServer({ apiKey: "", fetchImpl: async () => { called = true; } });
+        t.after(server.close);
+        for (const body of [
+            { text: "  ", languageCode: "hi-IN" },
+            { text: "नमस्ते", languageCode: "en-IN" },
+            { text: "क".repeat(2501), languageCode: "hi-IN" }
+        ]) {
+            const response = await server.post("/api/speech/hindi", body);
+            assert.equal(response.status, 400);
+        }
+        const boundary = await server.post("/api/speech/hindi", { text: "क".repeat(2500), languageCode: "hi-IN" });
+        assert.equal(boundary.status, 502, "valid-length request proceeds to the mocked upstream");
+        assert.equal(called, true);
+    });
+});
+
+test("Sarvam API errors and rate limits return controlled messages without upstream details", async t => {
+    await withSarvamKey(TEST_SARVAM_KEY, async () => {
+        for (const [upstreamStatus, expectedStatus, expectedMessage] of [
+            [429, 503, /temporarily busy/i],
+            [500, 502, /temporarily unavailable/i]
+        ]) {
+            const server = await startTestServer({ apiKey: "", fetchImpl: async () => new Response("secret upstream diagnostic", { status: upstreamStatus }) });
+            t.after(server.close);
+            const response = await server.post("/api/speech/hindi", { text: "नमस्ते", languageCode: "hi-IN" });
+            assert.equal(response.status, expectedStatus);
+            const body = await response.json();
+            assert.match(body.error, expectedMessage);
+            assert.doesNotMatch(JSON.stringify(body), /secret upstream diagnostic/i);
+        }
+    });
+});
+
+test("Sarvam TTS timeout aborts the upstream request and returns a controlled response", async t => {
+    await withSarvamKey(TEST_SARVAM_KEY, async () => {
+        let aborted = false;
+        const server = await startTestServer({
+            apiKey: "",
+            sarvamTimeoutMs: 10,
+            fetchImpl: (_url, { signal }) => new Promise((_resolve, reject) => {
+                signal.addEventListener("abort", () => {
+                    aborted = true;
+                    reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+                }, { once: true });
+            })
+        });
+        t.after(server.close);
+        const response = await server.post("/api/speech/hindi", { text: "नमस्ते", languageCode: "hi-IN" });
+        assert.equal(response.status, 504);
+        assert.match((await response.json()).error, /too long/i);
+        assert.equal(aborted, true);
+    });
 });
 
 test("frontend regression: bilingual speech, guidance targets, and AI-plan restart remain wired", async () => {
@@ -587,17 +1085,25 @@ test("frontend regression: bilingual speech, guidance targets, and AI-plan resta
     assert.match(script, /language\.setAttribute\("aria-label"/);
     assert.match(script, /Voice input is not supported in this browser/);
     assert.match(script, /showGuide\(task, plan, 0\)/);
-    assert.match(script, /previous\.onclick = \(\) => \{ if \(currentStep > 0\)/);
+    assert.match(script, /function previousStep\(\)/);
+    assert.match(script, /previous\.onclick = previousStep/);
     assert.match(script, /next\.onclick = advanceStep/);
     assert.match(script, /if \(steps\[currentStep\]\.target === "portalDownload"\)[\s\S]*?receipt-visible/);
-    assert.match(script, /speakText\(steps\[currentStep\]\.instruction\)/);
+    assert.match(script, /speakText\(activeGuidance\?\.getCurrent\(\)\.instruction \|\| steps\[currentStep\]\.instruction, guide\.querySelector\("#visualSpeak"\)\)/);
+    assert.match(script, /function handleGuideFollowUp\(value\)/);
+    assert.match(script, /guidance-mode/);
+    assert.match(script, /fetch\("\/api\/speech\/hindi"/);
+    assert.match(script, /languageCode: "hi-IN"/);
+    assert.match(script, /speechSynthesis\?\.cancel/);
+    assert.match(script, /URL\.revokeObjectURL/);
     assert.match(script, /if \(id === "portalReceipts"\)[\s\S]*?receipt-visible/);
     assert.match(script, /This is a demo; no file was downloaded/);
     assert.match(script, /No real file was downloaded/);
     assert.match(script, /No real portal or file is used/);
     assert.match(script, /result\.mode === "fallback"/);
     assert.match(script, /setTaskStatus\(result\.message/);
-    assert.match(script, /GEMINI_API_KEY/);
+    assert.match(script, /demoMode:\s*requestDemoMode/);
+    assert.match(script, /function resetDemo\(\)/);
     for (const target of targets) assert.ok(script.includes(target), `missing frontend target ${target}`);
     assert.match(html, /id="language"[\s\S]*value="hi"/);
     assert.match(html, /id="language" aria-label="Interface language"/);

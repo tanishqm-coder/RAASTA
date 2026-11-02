@@ -1,6 +1,126 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyReceiptIntent } from "./task-intent.js";
+import { classifyRaastaTask, classifyReceiptIntent, normalizeSpeechTranscript } from "./task-intent.js";
+
+const supportedWorkflowRequests = [
+    ["I want to book a train ticket.", "train_booking", null, "en"],
+    ["Mujhe Jaipur se Delhi ki train book karni hai.", "train_booking", null, "hi"],
+    ["How can I find trains between two cities?", "train_booking", null, "en"],
+    ["I want to download my bonafide certificate.", "document_download", "bonafide", "en"],
+    ["Mujhe apna document download karna hai.", "document_download", null, "hi"],
+    ["How do I download my marksheet?", "document_download", "marksheet", "en"],
+    ["Mujhe ID card download karna hai.", "document_download", "id_card", "hi"],
+    ["Teach me how to connect to Wi-Fi.", "smartphone_basics", "wifi", "en"],
+    ["Mujhe Wi-Fi connect karna sikhao.", "smartphone_basics", "wifi", "hi"],
+    ["How do I increase my phone brightness?", "smartphone_basics", "brightness", "en"],
+    ["How do I turn on Bluetooth?", "smartphone_basics", "bluetooth", "en"],
+    ["Turn Bluetooth on.", "smartphone_basics", "bluetooth", "en"],
+    ["Turn Bluetooth off.", "smartphone_basics", "bluetooth", "en"],
+    ["Enable Bluetooth.", "smartphone_basics", "bluetooth", "en"],
+    ["Mujhe Bluetooth on karna hai.", "smartphone_basics", "bluetooth", "hi"],
+    ["Bluetooth chalu karo.", "smartphone_basics", "bluetooth", "hi"],
+    ["Bluetooth band karna hai.", "smartphone_basics", "bluetooth", "hi"],
+    ["मुझे Bluetooth चालू करना है।", "smartphone_basics", "bluetooth", "hi"],
+    ["Bluetooth बंद कर दो।", "smartphone_basics", "bluetooth", "hi"],
+    ["Teach me how to use my smartphone.", "smartphone_basics", null, "en"]
+];
+
+for (const [request, category, topic, language] of supportedWorkflowRequests) {
+    test(`classifies supported Raasta workflow: ${request}`, () => {
+        const result = classifyRaastaTask(request, language);
+        assert.equal(result.supported, true);
+        assert.equal(result.category, category);
+        if (category === "smartphone_basics") assert.equal(result.topic, topic);
+    });
+}
+
+test("train route is extracted from English and Hinglish requests", () => {
+    const english = classifyRaastaTask("Book a train from Jaipur to Delhi.");
+    const hinglish = classifyRaastaTask("Mujhe Jaipur se Delhi ki train book karni hai.", "hi");
+    assert.deepEqual([english.source, english.destination], ["jaipur", "delhi"]);
+    assert.deepEqual([hinglish.source, hinglish.destination], ["jaipur", "delhi"]);
+});
+
+const ambiguousWorkflowRequests = [
+    ["Which document should I get?", /which document/i, "en"],
+    ["My phone settings are not working.", /Wi-Fi.*brightness.*Bluetooth/i, "en"],
+    ["I need to travel by train.", /cities/i, "en"]
+];
+
+for (const [request, expectedQuestion, language] of ambiguousWorkflowRequests) {
+    test(`asks clarification for ambiguous workflow request: ${request}`, () => {
+        const result = classifyRaastaTask(request, language);
+        assert.equal(result.supported, false);
+        assert.match(result.clarifyingQuestion, expectedQuestion);
+    });
+}
+
+test("does not misclassify unsupported requests as one of the simulated workflows", () => {
+    for (const request of [
+        "Book a flight ticket to Delhi.",
+        "I want to download a movie.",
+        "I want free Wi-Fi without connecting to my own network.",
+        "Help me hack the neighbor's Wi-Fi password.",
+        "What is the price of a Bluetooth speaker?",
+        "Recommend Bluetooth headphones.",
+        "How do I change my laptop notification settings?",
+        "Cancel my train ticket and refund it."
+    ]) {
+        assert.equal(classifyRaastaTask(request).supported, false, request);
+    }
+});
+
+test("TV and HDMI tasks stay out of the specialised smartphone tutorial classifier", () => {
+    for (const request of [
+        "Turn on my TV.",
+        "Mujhe TV chalu karni hai.",
+        "How do I change the HDMI input?",
+        "Connect my phone to my TV."
+    ]) {
+        const result = classifyRaastaTask(request);
+        assert.equal(result.category, "unsupported", request);
+        assert.equal(result.supported, false, request);
+        assert.notEqual(result.category, "smartphone_basics", request);
+    }
+});
+
+const speechCorrectionCases = [
+    ["Mujhe fee receipt download karni hai.", "Mujhe fee receipt download karni hai."],
+    ["Mujhe free receipt download karni hai.", "Mujhe fee receipt download karni hai."],
+    ["I need my free payment receipt.", "I need my fee payment receipt."],
+    ["Mujhe free mein receipt chahiye.", "Mujhe free mein receipt chahiye."],
+    ["I want free software.", "I want free software."],
+    ["Hostel fees ki receipt chahiye.", "Hostel fees ki receipt chahiye."]
+];
+
+for (const [input, expected] of speechCorrectionCases) {
+    test(`speech transcript normalization: ${input}`, () => {
+        assert.equal(normalizeSpeechTranscript(input), expected);
+    });
+}
+
+const robustFeeReceiptRequests = [
+    "Mujhe fee receipt download karni hai.",
+    "Mujhe free receipt download karni hai.",
+    "I need my free payment receipt.",
+    "Maine hostel ki fees bhar di, receipt chahiye.",
+    "Hostel fee ka proof download karna hai.",
+    "College fees ki rasid chahiye.",
+    "Mujhe semester fees ki receipt chahiye.",
+    "मुझे हॉस्टल की फीस की रसीद डाउनलोड करनी है।",
+    "मुझे सेमेस्टर फीस की रसीद चाहिए।"
+];
+
+for (const request of robustFeeReceiptRequests) {
+    test(`recognizes Hindi/Hinglish fee receipt speech transcript: ${request}`, () => {
+        assert.equal(classifyReceiptIntent(request), "supported");
+    });
+}
+
+test("free wording without clear receipt action remains literal and non-supported", () => {
+    assert.equal(classifyReceiptIntent("Mujhe free mein receipt chahiye."), "ambiguous");
+    assert.equal(classifyReceiptIntent("I want free software."), "ambiguous");
+});
 
 const supportedRequests = [
     "I paid college fees already. Help me locate and download my hostel fee receipt.",
