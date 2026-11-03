@@ -342,6 +342,39 @@ function stopSpeech() {
     speechPlayback.button = null;
 }
 
+// Browsers load speech voices asynchronously, so getVoices() can be empty on first use.
+function loadVoices(synth, timeoutMs = 2000) {
+    return new Promise(resolve => {
+        const existing = synth.getVoices();
+        if (existing.length) {
+            resolve(existing);
+            return;
+        }
+        let done = false;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            synth.removeEventListener?.("voiceschanged", finish);
+            resolve(synth.getVoices());
+        };
+        synth.addEventListener?.("voiceschanged", finish);
+        setTimeout(finish, timeoutMs);
+    });
+}
+
+// Voice language tags differ by browser and OS (hi-IN, hi_IN, hi), so normalise before matching.
+function normaliseLang(tag) {
+    return String(tag || "").toLowerCase().replace("_", "-");
+}
+
+function findHindiVoice(voices) {
+    const hindi = voices.filter(v => {
+        const tag = normaliseLang(v.lang);
+        return tag === "hi" || tag.startsWith("hi-");
+    });
+    return hindi.find(v => normaliseLang(v.lang) === "hi-in") || hindi[0] || null;
+}
+
 function speakWithBrowser(text) {
     const synth = window.speechSynthesis;
 
@@ -354,22 +387,32 @@ function speakWithBrowser(text) {
 
     synth.cancel();
 
+    // Speak immediately when voices are already loaded; otherwise wait for the browser to load them.
+    const voices = synth.getVoices();
+    if (voices.length) {
+        speakWithVoices(synth, text, voices);
+        return;
+    }
+    loadVoices(synth).then(loaded => speakWithVoices(synth, text, loaded));
+}
+
+function speakWithVoices(synth, text, voices) {
     const speech = new SpeechSynthesisUtterance(text);
 
     speech.rate = speechSpeed;
     speech.pitch = 1;
     speech.volume = 1;
 
-    const voices = synth.getVoices();
-
     if (language.value === "hi") {
 
-        const hindiVoice = voices.find(v =>
-            v.lang.toLowerCase() === "hi-in"
-        );
+        const hindiVoice = findHindiVoice(voices);
 
         if (!hindiVoice) {
-            setTaskStatus("Sarvam is unavailable and this browser has no Hindi voice installed.", "error");
+            setTaskStatus(
+                "हिंदी आवाज़ नहीं मिली। Microsoft Edge या Google Chrome में खोलें, या Windows Settings > Time & language > Language & region में Hindi जोड़ें और Speech डाउनलोड करें। "
+                + "No Hindi voice found. Open Raasta in Microsoft Edge or Google Chrome, or add Hindi speech in Windows Settings > Time & language > Language & region.",
+                "error"
+            );
             return;
         }
 
@@ -458,6 +501,9 @@ const supportedWorkflowTargets = {
     fee_receipt: supportedPortalTargets,
     train_booking: ["trainSource", "trainDestination", "trainDate", "trainSearch", "trainSelect", "trainPassenger", "trainReview", "bookingConfirm"],
     document_download: ["documentOpen", "documentCategory", "documentSample", "documentPreview", "documentDownload"],
+    upi_payment: ["upiOpenApp", "upiChooseMethod", "upiEnterId", "upiEnterAmount", "upiSelectAccount", "upiEnterPin", "upiSuccess"],
+    email_attachment: ["emailCompose", "emailTo", "emailSubject", "emailBody", "emailAttach", "emailSend", "emailSent"],
+    chat_message: ["chatOpenChat", "chatAttach", "chatGallery", "chatPickPhoto", "chatCaption", "chatSend", "chatSent"],
     smartphone_basics: {
         wifi: ["phoneSettings", "phoneWifi", "phoneNetwork", "phoneConnect", "phoneConnected"],
         brightness: ["phoneSettings", "phoneDisplay", "phoneBrightness", "phoneBrightnessDone"],
@@ -481,14 +527,28 @@ function guidanceDetail(target, title, isHindi, mode = guidanceMode) {
         documentCategory: "श्रेणी का मतलब है दस्तावेज़ का प्रकार।",
         portalReceipts: "यहाँ नमूना फीस रसीदें दिखाई जाती हैं।",
         phoneConnect: "यह केवल अभ्यास वाला नेटवर्क है।",
-        phoneToggle: "यह बदलाव केवल सिम्युलेटेड फोन स्क्रीन पर होगा।"
+        phoneToggle: "यह बदलाव केवल सिम्युलेटेड फोन स्क्रीन पर होगा।",
+        upiEnterId: "दिखने वाला नाम बैंक में दर्ज होता है; जाँचें कि यह वही व्यक्ति या दुकान है जिसे आप भुगतान करना चाहते हैं।",
+        upiSelectAccount: "वह बैंक खाता चुनें जिससे पैसे कटने चाहिए।",
+        upiEnterPin: "आपका UPI PIN गोपनीय है। असली पेमेंट ऐप आपसे इसे साझा करने को नहीं कहते।",
+        emailTo: "To वाले खाने में पाने वाले का ईमेल पता लिखा जाता है।",
+        emailAttach: "अटैचमेंट वह फ़ाइल है जो आपके ईमेल के साथ जाती है।",
+        chatAttach: "क्लिप के निशान से आप चैट में फोटो या फ़ाइल जोड़ सकते हैं।",
+        chatSent: "दो टिक आमतौर पर बताते हैं कि संदेश दूसरे फोन तक पहुँच गया।"
     } : {
         trainSource: "The starting city is where the journey begins.",
         trainDestination: "The destination is the city you are travelling to.",
         documentCategory: "A category means the kind of document you need.",
         portalReceipts: "This area contains sample college fee receipts.",
         phoneConnect: "This is only a sample network in the practice screen.",
-        phoneToggle: "This changes only the simulated phone screen."
+        phoneToggle: "This changes only the simulated phone screen.",
+        upiEnterId: "The name shown is registered with the bank; check it is the person or shop you mean to pay.",
+        upiSelectAccount: "Choose the bank account the money should come from.",
+        upiEnterPin: "Your UPI PIN is secret. Real payment apps never ask you to share it.",
+        emailTo: "The To box is where the receiver's email address goes.",
+        emailAttach: "An attachment is a file that travels with your email.",
+        chatAttach: "The paperclip lets you add a photo or file to the chat.",
+        chatSent: "Two ticks usually mean the message reached the other phone."
     };
     const prefix = isHindi
         ? `सिम्युलेटर में पीले रंग से हाइलाइट किए गए “${title}” कंट्रोल को देखें।`
@@ -683,8 +743,8 @@ function handleGuideFollowUp(value) {
 
 function titleForWorkflow(category, isHindi) {
     const titles = isHindi
-        ? { fee_receipt: "फीस रसीद", train_booking: "ट्रेन बुकिंग", document_download: "दस्तावेज़ डाउनलोड", smartphone_basics: "फोन ट्यूटोरियल" }
-        : { fee_receipt: "fee receipt", train_booking: "train booking", document_download: "document download", smartphone_basics: "phone tutorial" };
+        ? { fee_receipt: "फीस रसीद", train_booking: "ट्रेन बुकिंग", document_download: "दस्तावेज़ डाउनलोड", smartphone_basics: "फोन ट्यूटोरियल", upi_payment: "UPI भुगतान", email_attachment: "अटैचमेंट के साथ ईमेल", chat_message: "चैट संदेश" }
+        : { fee_receipt: "fee receipt", train_booking: "train booking", document_download: "document download", smartphone_basics: "phone tutorial", upi_payment: "UPI payment", email_attachment: "email with attachment", chat_message: "chat message" };
     return titles[category] || (isHindi ? "आपकी गाइड" : "your guide");
 }
 
@@ -979,7 +1039,20 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
             wifiNetwork: "Campus Wi-Fi",
             wifiConnected: false,
             brightness: 50,
-            bluetooth: false
+            bluetooth: false,
+            travelClass: "SL",
+            quota: "GN",
+            passengerGender: "Male",
+            passengerBerth: "No Preference",
+            documentYear: "2025-26",
+            upiId: "demoshop@demobank",
+            upiAmount: "100",
+            upiNote: "",
+            emailTo: "teacher@example.com",
+            emailSubject: "Assignment submission",
+            emailBody: "Dear Sir/Madam,\n\nPlease find my assignment attached.\n\nThank you.",
+            emailAttached: false,
+            chatCaption: "Look at this!"
         };
     };
     resetState();
@@ -988,11 +1061,17 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
         const titles = isHindi ? {
             trainSource: "शुरुआती शहर", trainDestination: "गंतव्य शहर", trainDate: "यात्रा की तारीख", trainSearch: "नमूना ट्रेनें खोजें", trainSelect: "ट्रेन चुनें", trainPassenger: "यात्री का विवरण", trainReview: "यात्रा की समीक्षा", bookingConfirm: "डेमो बुकिंग पूरी करें",
             documentOpen: "Documents खोलें", documentCategory: "दस्तावेज़ की श्रेणी चुनें", documentSample: "नमूना दस्तावेज़ चुनें", documentPreview: "पूर्वावलोकन देखें", documentDownload: "डेमो पूरा करें",
-            phoneTutorialChoice: "ट्यूटोरियल चुनें", phoneSettings: "Settings खोलें", phoneWifi: "Wi-Fi सेटिंग चुनें", phoneNetwork: "नेटवर्क चुनें", phoneConnect: "कनेक्ट करें", phoneConnected: "कनेक्शन देखें", phoneDisplay: "Display सेटिंग चुनें", phoneBrightness: "चमक बदलें", phoneBrightnessDone: "चमक की पुष्टि करें", phoneBluetooth: "Bluetooth सेटिंग चुनें", phoneToggle: "Bluetooth बदलें", phoneBluetoothDone: "स्थिति देखें"
+            phoneTutorialChoice: "ट्यूटोरियल चुनें", phoneSettings: "Settings खोलें", phoneWifi: "Wi-Fi सेटिंग चुनें", phoneNetwork: "नेटवर्क चुनें", phoneConnect: "कनेक्ट करें", phoneConnected: "कनेक्शन देखें", phoneDisplay: "Display सेटिंग चुनें", phoneBrightness: "चमक बदलें", phoneBrightnessDone: "चमक की पुष्टि करें", phoneBluetooth: "Bluetooth सेटिंग चुनें", phoneToggle: "Bluetooth बदलें", phoneBluetoothDone: "स्थिति देखें",
+            upiOpenApp: "पेमेंट ऐप खोलें", upiChooseMethod: "भुगतान का तरीका चुनें", upiEnterId: "UPI ID दर्ज करें", upiEnterAmount: "रकम दर्ज करें", upiSelectAccount: "बैंक खाता चुनें", upiEnterPin: "UPI PIN चरण", upiSuccess: "भुगतान की पुष्टि देखें",
+            emailCompose: "Compose चुनें", emailTo: "पाने वाले का पता लिखें", emailSubject: "Subject लिखें", emailBody: "संदेश लिखें", emailAttach: "फ़ाइल अटैच करें", emailSend: "ईमेल भेजें", emailSent: "भेजे जाने की पुष्टि देखें",
+            chatOpenChat: "चैट खोलें", chatAttach: "Attach बटन दबाएँ", chatGallery: "Gallery चुनें", chatPickPhoto: "फोटो चुनें", chatCaption: "कैप्शन लिखें", chatSend: "फोटो भेजें", chatSent: "डिलीवरी देखें"
         } : {
             trainSource: "Enter your starting city", trainDestination: "Enter your destination", trainDate: "Choose a travel date", trainSearch: "Search sample trains", trainSelect: "Choose a train", trainPassenger: "Enter passenger details", trainReview: "Review the journey", bookingConfirm: "Complete the demo booking",
             documentOpen: "Open Documents", documentCategory: "Choose a document category", documentSample: "Choose a sample document", documentPreview: "Review the preview", documentDownload: "Finish the demo",
-            phoneTutorialChoice: "Choose a tutorial", phoneSettings: "Open Settings", phoneWifi: "Choose Wi-Fi settings", phoneNetwork: "Choose a network", phoneConnect: "Connect to the sample network", phoneConnected: "Check the connection", phoneDisplay: "Open Display settings", phoneBrightness: "Adjust screen brightness", phoneBrightnessDone: "Check the brightness", phoneBluetooth: "Open Bluetooth settings", phoneToggle: "Turn Bluetooth on or off", phoneBluetoothDone: "Check Bluetooth status"
+            phoneTutorialChoice: "Choose a tutorial", phoneSettings: "Open Settings", phoneWifi: "Choose Wi-Fi settings", phoneNetwork: "Choose a network", phoneConnect: "Connect to the sample network", phoneConnected: "Check the connection", phoneDisplay: "Open Display settings", phoneBrightness: "Adjust screen brightness", phoneBrightnessDone: "Check the brightness", phoneBluetooth: "Open Bluetooth settings", phoneToggle: "Turn Bluetooth on or off", phoneBluetoothDone: "Check Bluetooth status",
+            upiOpenApp: "Open the payments app", upiChooseMethod: "Choose how to pay", upiEnterId: "Enter the UPI ID", upiEnterAmount: "Enter the amount", upiSelectAccount: "Choose the bank account", upiEnterPin: "UPI PIN step", upiSuccess: "Check the payment result",
+            emailCompose: "Select Compose", emailTo: "Enter the recipient", emailSubject: "Write a subject", emailBody: "Write your message", emailAttach: "Attach a file", emailSend: "Send the email", emailSent: "Check it was sent",
+            chatOpenChat: "Open the chat", chatAttach: "Tap the attach button", chatGallery: "Choose Gallery", chatPickPhoto: "Pick a photo", chatCaption: "Write a caption", chatSend: "Send the photo", chatSent: "Check delivery"
         };
         return titles[target] || (isHindi ? "यह चरण पूरा करें" : "Complete this step");
     }
@@ -1011,11 +1090,15 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
                 <p class="tagline">${isHindi ? "रास्ता इंटरैक्टिव गाइड" : "RAASTA INTERACTIVE GUIDE"}</p>
                 <h2>${isHindi ? "आइए, साथ में पूरा करें" : "Let’s work through it together"}</h2>
                 <p class="guide-task"></p>
-                <p class="simulation-note">${isHindi ? "यह केवल एक सिमुलेशन है। कोई वास्तविक टिकट बुक, दस्तावेज़ डाउनलोड या डिवाइस सेटिंग नहीं बदली जाएगी।" : "SIMULATION ONLY · No real ticket is booked, document downloaded, or device setting changed."}</p>
+                <p class="simulation-note">${({
+                    upi_payment: isHindi ? "यह केवल एक सिमुलेशन है। कोई वास्तविक पैसा नहीं भेजा जाएगा और कोई UPI PIN दर्ज या सेव नहीं होगा।" : "SIMULATION ONLY · No real money is sent and no UPI PIN is entered or stored.",
+                    email_attachment: isHindi ? "यह केवल एक सिमुलेशन है। कोई वास्तविक ईमेल नहीं भेजा जाएगा और कोई फ़ाइल इस पेज से बाहर नहीं जाएगी।" : "SIMULATION ONLY · No real email is sent and no file leaves this page.",
+                    chat_message: isHindi ? "यह केवल एक सिमुलेशन है। कोई वास्तविक संदेश या फोटो नहीं भेजी जाएगी।" : "SIMULATION ONLY · No real message or photo is sent."
+                })[plan.category] || (isHindi ? "यह केवल एक सिमुलेशन है। कोई वास्तविक टिकट बुक, दस्तावेज़ डाउनलोड या डिवाइस सेटिंग नहीं बदली जाएगी।" : "SIMULATION ONLY · No real ticket is booked, document downloaded, or device setting changed.")}</p>
             </header>
             <div class="workflow-layout">
                 <section class="workflow-simulator" aria-label="${isHindi ? "सिम्युलेटेड अभ्यास" : "Simulated practice"}">
-                    <div class="workflow-device-header"><span>${plan.category === "train_booking" ? "🚆" : plan.category === "document_download" ? "📁" : "📱"}</span><strong class="workflow-app-title"></strong><span class="demo-badge">${isHindi ? "डेमो" : "DEMO"}</span></div>
+                    <div class="workflow-device-header"><span>${({ train_booking: "🚆", document_download: "📁", upi_payment: "💳", email_attachment: "✉️", chat_message: "💬" })[plan.category] || "📱"}</span><strong class="workflow-app-title"></strong><span class="demo-badge">${isHindi ? "डेमो" : "DEMO"}</span></div>
                     <div class="workflow-screen" aria-live="polite"></div>
                 </section>
                 <aside class="workflow-instructions">
@@ -1059,42 +1142,135 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
         })[character]);
     }
 
+    const tr = (english, hindi) => (isHindi ? hindi : english);
+    const esc = value => escapeWorkflowText(value);
+    const trainClasses = {
+        SL: { label: tr("Sleeper (SL)", "स्लीपर (SL)"), fare: 305, seats: "AVAILABLE 042" },
+        "3A": { label: tr("Third AC (3A)", "थर्ड AC (3A)"), fare: 815, seats: "AVAILABLE 018" },
+        "2A": { label: tr("Second AC (2A)", "सेकंड AC (2A)"), fare: 1160, seats: "RAC 006" }
+    };
+    const trainQuotas = { GN: tr("General", "सामान्य"), LD: tr("Ladies", "महिला"), TQ: tr("Tatkal", "तत्काल") };
+    const optionList = (items, selected) => Object.entries(items).map(([value, label]) =>
+        `<option value="${value}"${value === selected ? " selected" : ""}>${typeof label === "string" ? label : label.label}</option>`).join("");
+
+    const phoneShell = (title, inner) => `<div class="sim-phone"><div class="phone-status">9:41 ▪▪▪</div><div class="phone-appbar"><span aria-hidden="true">←</span><strong>${title}</strong></div>${inner}</div>`;
+    const simSwitch = (id, on, label) => `<button id="${id}" class="sim-switch${on ? " is-on" : ""}" type="button" role="switch" aria-checked="${on ? "true" : "false"}" aria-label="${label}"><span class="sim-switch-knob"></span></button>`;
+    const staticSwitch = on => `<span class="sim-switch is-static${on ? " is-on" : ""}" aria-hidden="true"><span class="sim-switch-knob"></span></span>`;
+
     function renderTrainStage(target) {
-        guide.querySelector(".workflow-app-title").textContent = isHindi ? "रेल यात्रा डेमो" : "Train Journey Demo";
-        if (target === "trainSource") return `<h3>${isHindi ? "कहाँ से यात्रा शुरू करेंगे?" : "Where will you start?"}</h3><label>${isHindi ? "शुरुआती शहर" : "From city"}<input id="trainSource" type="text" autocomplete="off" aria-label="${isHindi ? "शुरुआती शहर" : "Starting city"}"></label>`;
-        if (target === "trainDestination") return `<h3>${isHindi ? "आपका गंतव्य क्या है?" : "Where are you going?"}</h3><label>${isHindi ? "गंतव्य शहर" : "To city"}<input id="trainDestination" type="text" autocomplete="off" aria-label="${isHindi ? "गंतव्य शहर" : "Destination city"}"></label>`;
-        if (target === "trainDate") return `<h3>${isHindi ? "यात्रा की तारीख चुनें" : "Choose your travel date"}</h3><label>${isHindi ? "यात्रा की तारीख" : "Travel date"}<input id="trainDate" type="date" aria-label="${isHindi ? "यात्रा की तारीख" : "Travel date"}"></label>`;
-        if (target === "trainSearch") return `<h3>${isHindi ? "नमूना ट्रेनें खोजें" : "Search sample trains"}</h3><p class="workflow-muted">${escapeWorkflowText(state.source)} → ${escapeWorkflowText(state.destination)}</p><button id="trainSearch" class="workflow-action" type="button">🔎 ${isHindi ? "ट्रेनें खोजें" : "Search trains"}</button>`;
-        if (target === "trainSelect") return `<h3>${isHindi ? "एक डेमो ट्रेन चुनें" : "Choose a sample train"}</h3><button id="trainSelect" class="workflow-choice active-choice" type="button"><strong>🚆 Intercity Express</strong><span>08:30 → 14:15 · ${escapeWorkflowText(state.source)} to ${escapeWorkflowText(state.destination)}</span></button><button class="workflow-choice" type="button" data-train="Superfast Express"><strong>🚄 Superfast Express</strong><span>10:10 → 15:40 · ${isHindi ? "नमूना विकल्प" : "Sample option"}</span></button>`;
-        if (target === "trainPassenger") return `<h3>${isHindi ? "यात्री का डेमो विवरण" : "Demo passenger details"}</h3><p class="workflow-muted">${isHindi ? "यह जानकारी केवल इस ब्राउज़र के डेमो में रहती है।" : "These details stay in this browser simulation only."}</p><label>${isHindi ? "नाम" : "Name"}<input id="passengerName" type="text" autocomplete="off"></label><label>${isHindi ? "उम्र" : "Age"}<input id="passengerAge" type="number" min="1" max="120"></label><button id="trainPassenger" class="workflow-action" type="button">${isHindi ? "विवरण सहेजें" : "Save demo details"}</button>`;
-        if (target === "trainReview") return `<h3>${isHindi ? "बुकिंग की समीक्षा" : "Review booking"}</h3><dl class="workflow-summary"><dt>${isHindi ? "यात्रा" : "Journey"}</dt><dd>${escapeWorkflowText(state.source)} → ${escapeWorkflowText(state.destination)}</dd><dt>${isHindi ? "तारीख" : "Date"}</dt><dd>${escapeWorkflowText(state.date)}</dd><dt>${isHindi ? "ट्रेन" : "Train"}</dt><dd>${escapeWorkflowText(state.selectedTrain)}</dd><dt>${isHindi ? "यात्री" : "Passenger"}</dt><dd>${escapeWorkflowText(state.passengerName)}, ${escapeWorkflowText(state.passengerAge)}</dd></dl><p class="workflow-muted">${isHindi ? "कोई भुगतान नहीं लिया जाएगा।" : "No payment will be taken."}</p>`;
-        return `<h3>${isHindi ? "डेमो बुकिंग की पुष्टि" : "Confirm demo booking"}</h3><p class="workflow-muted">${isHindi ? "यह केवल अभ्यास है; कोई वास्तविक टिकट आरक्षित नहीं होगा।" : "This is practice only; no real ticket will be reserved."}</p><button id="bookingConfirm" class="workflow-action" type="button">✓ ${isHindi ? "डेमो पूरा करें" : "Finish simulation"}</button>`;
+        guide.querySelector(".workflow-app-title").textContent = tr("Train Journey Demo", "रेल यात्रा डेमो");
+        const cls = trainClasses[state.travelClass] || trainClasses.SL;
+        const stepLabels = [tr("Search", "खोज"), tr("Select train", "ट्रेन चुनें"), tr("Passengers", "यात्री"), tr("Review", "समीक्षा"), tr("Payment", "भुगतान")];
+        const site = (stepIndex, inner) => `<div class="sim-site"><div class="sim-site-header"><strong>🚆 ${tr("Rail Booking", "रेल बुकिंग")}</strong><span class="sim-site-nav"><span class="nav-active">${tr("Book Ticket", "टिकट बुक करें")}</span><span>${tr("PNR Status", "PNR स्थिति")}</span><span>${tr("Train Schedule", "ट्रेन समय सारणी")}</span></span><span class="sim-site-user">👤 ${tr("Demo User", "डेमो यूज़र")}</span></div><div class="sim-site-body"><ol class="sim-stepper" aria-hidden="true">${stepLabels.map((label, index) => `<li class="${index === stepIndex ? "is-current" : index < stepIndex ? "is-done" : ""}">${label}</li>`).join("")}</ol>${inner}</div></div>`;
+        const classChips = extraFare => Object.entries(trainClasses).map(([code, item]) => `<span class="class-chip${code === state.travelClass ? " is-selected" : ""}"><b>${code}</b> ₹${item.fare + extraFare}<small>${item.seats}</small></span>`).join("");
+        const trainCard = (number, name, depart, arrive, duration, extraFare) => `<strong>${number} · ${name}</strong><span class="train-times"><b>${depart}</b> ${esc(state.source)} <i>── ${duration} ──</i> <b>${arrive}</b> ${esc(state.destination)}</span><span class="train-runs">${tr("Runs on", "चलती है")}: ${tr("Daily", "प्रतिदिन")}</span><span class="class-chips">${classChips(extraFare)}</span>`;
+        if (["trainSource", "trainDestination", "trainDate", "trainSearch"].includes(target)) {
+            return site(0, `<h3>${tr("Book Ticket", "टिकट बुक करें")}</h3><div class="journey-grid"><label>${tr("From", "कहाँ से")}<input id="trainSource" type="text" autocomplete="off" aria-label="${tr("Starting city", "शुरुआती शहर")}"></label><label>${tr("To", "कहाँ तक")}<input id="trainDestination" type="text" autocomplete="off" aria-label="${tr("Destination city", "गंतव्य शहर")}"></label><label>${tr("Journey date", "यात्रा की तारीख")}<input id="trainDate" type="date" aria-label="${tr("Travel date", "यात्रा की तारीख")}"></label><label>${tr("Class", "श्रेणी (Class)")}<select id="trainClass" aria-label="${tr("Class", "श्रेणी")}">${optionList(trainClasses, state.travelClass)}</select></label><label>${tr("Quota", "कोटा")}<select id="trainQuota" aria-label="${tr("Quota", "कोटा")}">${optionList(trainQuotas, state.quota)}</select></label></div><button id="trainSearch" class="workflow-action" type="button">🔎 ${tr("Search trains", "ट्रेनें खोजें")}</button><p class="workflow-muted">${tr("Sample trains and fares only. Nothing here is real.", "केवल नमूना ट्रेनें और किराए। यहाँ कुछ भी वास्तविक नहीं है।")}</p>`);
+        }
+        if (target === "trainSelect") {
+            return site(1, `<h3>${tr("Available trains", "उपलब्ध ट्रेनें")}</h3><p class="workflow-muted">${esc(state.source)} → ${esc(state.destination)} · ${esc(state.date)} · ${trainQuotas[state.quota]}</p><button id="trainSelect" class="workflow-choice train-card active-choice" type="button">${trainCard("12987", "Intercity Express", "08:30", "14:15", "5h 45m", 0)}</button><button class="workflow-choice train-card" type="button" data-train="Superfast Express">${trainCard("22461", "Superfast Express", "10:10", "15:40", "5h 30m", 120)}</button><p class="workflow-muted">${tr("Check the seat status (AVAILABLE or RAC) before you book. Fares shown are demo values.", "बुक करने से पहले सीट की स्थिति (AVAILABLE या RAC) देखें। दिखाए गए किराए डेमो मान हैं।")}</p>`);
+        }
+        if (target === "trainPassenger") {
+            return site(2, `<h3>${tr("Passenger details", "यात्री का विवरण")}</h3><p class="workflow-muted">${tr("These details stay in this browser simulation only.", "यह जानकारी केवल इस ब्राउज़र के डेमो में रहती है।")}</p><div class="journey-grid"><label>${tr("Name", "नाम")}<input id="passengerName" type="text" autocomplete="off"></label><label>${tr("Age", "उम्र")}<input id="passengerAge" type="number" min="1" max="120"></label><label>${tr("Gender", "लिंग")}<select id="passengerGender"><option value="Male">${tr("Male", "पुरुष")}</option><option value="Female">${tr("Female", "महिला")}</option><option value="Other">${tr("Other", "अन्य")}</option></select></label><label>${tr("Berth preference", "बर्थ की पसंद")}<select id="passengerBerth"><option value="No Preference">${tr("No preference", "कोई पसंद नहीं")}</option><option value="Lower">${tr("Lower", "लोअर")}</option><option value="Middle">${tr("Middle", "मिडिल")}</option><option value="Upper">${tr("Upper", "अपर")}</option></select></label></div><button id="trainPassenger" class="workflow-action" type="button">${tr("Save demo details", "विवरण सहेजें")}</button>`);
+        }
+        if (target === "trainReview") {
+            const fare = cls.fare, reservation = 40, total = fare + reservation;
+            return site(3, `<h3>${tr("Review booking", "बुकिंग की समीक्षा")}</h3><dl class="workflow-summary"><dt>${tr("Journey", "यात्रा")}</dt><dd>${esc(state.source)} → ${esc(state.destination)}</dd><dt>${tr("Date", "तारीख")}</dt><dd>${esc(state.date)}</dd><dt>${tr("Train", "ट्रेन")}</dt><dd>${esc(state.selectedTrain)}</dd><dt>${tr("Class · Quota", "श्रेणी · कोटा")}</dt><dd>${cls.label} · ${trainQuotas[state.quota]}</dd><dt>${tr("Passenger", "यात्री")}</dt><dd>${esc(state.passengerName)}, ${esc(state.passengerAge)}, ${esc(state.passengerGender)} · ${esc(state.passengerBerth)}</dd><dt>${tr("Base fare (demo)", "मूल किराया (डेमो)")}</dt><dd>₹${fare}</dd><dt>${tr("Reservation charge (demo)", "आरक्षण शुल्क (डेमो)")}</dt><dd>₹${reservation}</dd><dt>${tr("Total (demo)", "कुल (डेमो)")}</dt><dd><strong>₹${total}</strong></dd></dl><p class="workflow-muted">${tr("Check every detail now. No payment will be taken in this demo.", "अभी हर विवरण जाँच लें। इस डेमो में कोई भुगतान नहीं लिया जाएगा।")}</p>`);
+        }
+        const payable = (trainClasses[state.travelClass] || trainClasses.SL).fare + 40;
+        return site(4, `<h3>${tr("Payment", "भुगतान")}</h3><p class="workflow-muted">${tr("Choose how you would pay. In this demo nothing is charged.", "चुनें कि आप कैसे भुगतान करते। इस डेमो में कुछ भी चार्ज नहीं होता।")}</p><div class="setting-row setting-decoy pay-method is-selected">◉ ${tr("UPI", "UPI")}<span>${tr("Demo", "डेमो")}</span></div><div class="setting-row setting-decoy pay-method">○ ${tr("Debit / credit card", "डेबिट / क्रेडिट कार्ड")}<span>${tr("Demo", "डेमो")}</span></div><div class="setting-row setting-decoy pay-method">○ ${tr("Net banking", "नेट बैंकिंग")}<span>${tr("Demo", "डेमो")}</span></div><p class="pay-total">${tr("Amount payable", "देय राशि")}: <strong>₹${payable}</strong></p><button id="bookingConfirm" class="workflow-action" type="button">✓ ${tr("Pay", "भुगतान करें")} ₹${payable} (${tr("demo", "डेमो")})</button><p class="workflow-muted">${tr("In a real booking you would enter your payment details privately here. This is practice only; no real ticket will be reserved.", "असली बुकिंग में आप यहाँ अपने भुगतान विवरण निजी तौर पर डालते। यह केवल अभ्यास है; कोई वास्तविक टिकट आरक्षित नहीं होगा।")}</p>`);
     }
 
     function renderDocumentStage(target) {
-        guide.querySelector(".workflow-app-title").textContent = isHindi ? "Documents डेमो" : "Documents Demo";
-        if (target === "documentOpen") return `<h3>${isHindi ? "आपके सिम्युलेटेड दस्तावेज़" : "Your simulated documents"}</h3><p class="workflow-muted">${isHindi ? "यहाँ नमूना दस्तावेज़ देखे जा सकते हैं।" : "Sample documents are available here."}</p><button id="documentOpen" class="workflow-action" type="button">📁 ${isHindi ? "Documents खोलें" : "Open Documents"}</button>`;
-        if (target === "documentCategory") return `<h3>${isHindi ? "दस्तावेज़ की श्रेणी चुनें" : "Choose a document category"}</h3><label>${isHindi ? "श्रेणी" : "Category"}<select id="documentCategory" aria-label="${isHindi ? "दस्तावेज़ की श्रेणी" : "Document category"}"><option value="">${isHindi ? "श्रेणी चुनें" : "Choose a category"}</option><option value="bonafide">${documentLabel("bonafide")}</option><option value="marksheet">${documentLabel("marksheet")}</option><option value="id_card">${documentLabel("id_card")}</option><option value="fee_receipt">${documentLabel("fee_receipt")}</option></select></label>`;
-        if (target === "documentSample") return `<h3>${isHindi ? "एक नमूना दस्तावेज़ चुनें" : "Select a sample document"}</h3><button id="documentSample" class="workflow-choice active-choice" type="button"><strong>📄 ${documentLabel(state.documentType)}</strong><span>${isHindi ? "डेमो छात्र रिकॉर्ड · नमूना" : "Demo student record · sample"}</span></button>`;
-        if (target === "documentPreview") return `<h3>${isHindi ? "दस्तावेज़ का पूर्वावलोकन" : "Document preview"}</h3><div class="sample-document"><span>🎓 RAASTA · DEMO</span><strong>${documentLabel(state.documentType)}</strong><p>${isHindi ? "नमूना छात्र दस्तावेज़" : "Sample student document"}</p><small>${isHindi ? "केवल सिमुलेशन" : "SIMULATION ONLY"}</small></div><button id="documentPreview" class="workflow-action" type="button">${isHindi ? "पूर्वावलोकन देखा" : "Preview checked"}</button>`;
-        return `<h3>${isHindi ? "डेमो डाउनलोड तैयार है" : "Demo download is ready"}</h3><p class="workflow-muted">${isHindi ? "कोई वास्तविक संस्थागत दस्तावेज़ डाउनलोड नहीं होगा।" : "No real institutional document will be downloaded."}</p><button id="documentDownload" class="workflow-action" type="button">⬇ ${isHindi ? "डेमो पूरा करें" : "Finish simulated download"}</button>`;
+        guide.querySelector(".workflow-app-title").textContent = tr("Documents Demo", "Documents डेमो");
+        const onDashboard = target === "documentOpen";
+        const navItems = [["🏠", tr("Dashboard", "डैशबोर्ड")], ["👤", tr("My Profile", "मेरी प्रोफ़ाइल")], ["📁", tr("Documents", "दस्तावेज़")], ["💳", tr("Fee Details", "फीस विवरण")], ["📝", tr("Examinations", "परीक्षा")], ["📚", tr("Library", "पुस्तकालय")]];
+        const nav = navItems.map(([icon, label], index) => {
+            if (index === 2 && onDashboard) return `<button id="documentOpen" class="portal-option" type="button">${icon} ${label}</button>`;
+            const current = (index === 0 && onDashboard) || (index === 2 && !onDashboard);
+            return `<button class="portal-option${current ? " nav-current" : ""}" type="button"${current ? ' aria-current="page"' : ""}>${icon} ${label}</button>`;
+        }).join("");
+        const portal = inner => `<div class="portal"><div class="portal-header"><strong>🎓 ${tr("Student Portal", "छात्र पोर्टल")}</strong><span>${tr("Demo Student Account · Enrolment DEMO-2025-0042 · Semester 1", "डेमो छात्र खाता · नामांकन DEMO-2025-0042 · सेमेस्टर 1")}</span></div><div class="portal-body"><aside class="portal-sidebar"><p>${tr("MAIN MENU", "मुख्य मेन्यू")}</p>${nav}</aside><div class="portal-main">${inner}</div></div></div>`;
+        const issued = tr("12 Aug 2025", "12 अग॰ 2025");
+        if (target === "documentOpen") return portal(`<h3>${tr("Welcome back, Demo Student", "वापसी पर स्वागत है, Demo Student")}</h3><p>${tr("Semester 1 · Academic year 2025–26", "सेमेस्टर 1 · शैक्षणिक वर्ष 2025–26")}</p><div class="stat-row"><div class="stat"><strong>86%</strong><span>${tr("Attendance (demo)", "उपस्थिति (डेमो)")}</span></div><div class="stat"><strong>₹0</strong><span>${tr("Fees due (demo)", "बकाया फीस (डेमो)")}</span></div><div class="stat"><strong>2</strong><span>${tr("New notices", "नई सूचनाएँ")}</span></div></div><div class="document-card"><div class="document-icon">📢</div><div><strong>${tr("Notice", "सूचना")}</strong><p>${tr("Mid-semester exam schedule will be published soon. (sample)", "मध्य-सेमेस्टर परीक्षा का कार्यक्रम जल्द प्रकाशित होगा। (नमूना)")}</p></div></div>`);
+        if (target === "documentCategory") return portal(`<h3>${tr("My Documents", "मेरे दस्तावेज़")}</h3><p>${tr("Choose the year and the type of document you need.", "वर्ष और जिस प्रकार का दस्तावेज़ चाहिए, वह चुनें।")}</p><div class="journey-grid"><label>${tr("Academic year", "शैक्षणिक वर्ष")}<select id="documentYear" aria-label="${tr("Academic year", "शैक्षणिक वर्ष")}"><option value="2025-26">2025–26</option><option value="2024-25">2024–25</option></select></label><label>${tr("Category", "श्रेणी")}<select id="documentCategory" aria-label="${tr("Document category", "दस्तावेज़ की श्रेणी")}"><option value="">${tr("Choose a category", "श्रेणी चुनें")}</option><option value="bonafide">${documentLabel("bonafide")}</option><option value="marksheet">${documentLabel("marksheet")}</option><option value="id_card">${documentLabel("id_card")}</option><option value="fee_receipt">${documentLabel("fee_receipt")}</option></select></label></div><div class="empty-state">${tr("Select a category to see the documents available for you.", "आपके लिए उपलब्ध दस्तावेज़ देखने के लिए श्रेणी चुनें।")}</div>`);
+        if (target === "documentSample") return portal(`<h3>${tr("My Documents", "मेरे दस्तावेज़")}</h3><p>${esc(state.documentYear)} · ${documentLabel(state.documentType)}</p><div class="doc-table"><div class="doc-row doc-head"><span>${tr("Document", "दस्तावेज़")}</span><span>${tr("Issued", "जारी")}</span><span>${tr("Size", "आकार")}</span><span></span></div><div class="doc-row"><span>📄 ${documentLabel(state.documentType)}</span><span>${issued}</span><span>120 KB</span><button id="documentSample" class="portal-action active-choice" type="button">${tr("View", "देखें")} →</button></div></div><p class="workflow-muted">${tr("Demo student record · sample · Ref DEMO/2025/0042 · PDF", "डेमो छात्र रिकॉर्ड · नमूना · संदर्भ DEMO/2025/0042 · PDF")}</p>`);
+        const preview = `<div class="sample-document"><span>🎓 RAASTA · DEMO</span><strong>${documentLabel(state.documentType)}</strong><p>${tr("Sample student document", "नमूना छात्र दस्तावेज़")}</p><small>${tr("Academic year", "शैक्षणिक वर्ष")} ${esc(state.documentYear)} · ${tr("Ref", "संदर्भ")} DEMO/2025/0042</small><small>${tr("SIMULATION ONLY", "केवल सिमुलेशन")}</small></div>`;
+        if (target === "documentPreview") return portal(`<h3>${tr("Document preview", "दस्तावेज़ का पूर्वावलोकन")}</h3><div class="preview-toolbar"><span>${documentLabel(state.documentType)}.pdf</span><span>${tr("Page 1 of 1", "पृष्ठ 1 / 1")}</span></div>${preview}<button id="documentPreview" class="workflow-action" type="button">${tr("Preview checked", "पूर्वावलोकन देखा")}</button>`);
+        return portal(`<h3>${tr("Download document", "दस्तावेज़ डाउनलोड करें")}</h3><div class="preview-toolbar"><span>${documentLabel(state.documentType)}.pdf</span><span>120 KB</span></div>${preview}<button id="documentDownload" class="workflow-action" type="button">⬇ ${tr("Download PDF (demo)", "PDF डाउनलोड करें (डेमो)")}</button><p class="workflow-muted">${tr("In a real portal the PDF would save to your Downloads folder. No real institutional document will be downloaded.", "असली पोर्टल में PDF आपके Downloads फ़ोल्डर में सेव होता। कोई वास्तविक संस्थागत दस्तावेज़ डाउनलोड नहीं होगा।")}</p>`);
     }
 
     function renderPhoneStage(target) {
-        guide.querySelector(".workflow-app-title").textContent = isHindi ? "फोन Settings डेमो" : "Phone Settings Demo";
-        if (target === "phoneTutorialChoice") return `<h3>${isHindi ? "किस सेटिंग के बारे में सीखेंगे?" : "Which setting would you like to learn?"}</h3><div id="phoneTutorialChoice" class="phone-tutorial-choices"><button type="button" data-phone-topic="wifi">📶 ${isHindi ? "Wi-Fi जोड़ें" : "Connect to Wi-Fi"}</button><button type="button" data-phone-topic="brightness">☀️ ${isHindi ? "चमक बदलें" : "Adjust brightness"}</button><button type="button" data-phone-topic="bluetooth">ᛒ ${isHindi ? "Bluetooth चालू/बंद करें" : "Turn Bluetooth on/off"}</button></div>`;
-        if (target === "phoneSettings") return `<div class="phone-settings-screen"><div class="phone-status">9:41 ▪▪▪</div><h3>⚙️ ${isHindi ? "Settings" : "Settings"}</h3><p>${isHindi ? "यह फोन का सिम्युलेटेड Settings पेज है।" : "This is a simulated phone settings screen."}</p><button id="phoneSettings" class="workflow-choice active-choice" type="button">${isHindi ? "नेटवर्क और डिस्प्ले सेटिंग्स" : "Network and display settings"} →</button></div>`;
-        if (target === "phoneWifi") return `<h3>${isHindi ? "Network & Internet" : "Network & Internet"}</h3><button id="phoneWifi" class="setting-row active-choice" type="button"><span>📶 Wi-Fi</span><span>${isHindi ? "बंद" : "Off"} →</span></button>`;
-        if (target === "phoneNetwork") return `<h3>${isHindi ? "Wi-Fi नेटवर्क चुनें" : "Choose a Wi-Fi network"}</h3><button id="phoneNetwork" class="setting-row active-choice" type="button">🔒 Campus Wi-Fi <span>▂▄▆</span></button><p class="workflow-muted">${isHindi ? "यह एक नमूना नेटवर्क है।" : "This is a sample network."}</p>`;
-        if (target === "phoneConnect") return `<h3>Campus Wi-Fi</h3><p class="workflow-muted">${isHindi ? "सिम्युलेटेड कनेक्शन" : "Simulated connection"}</p><button id="phoneConnect" class="workflow-action" type="button">${isHindi ? "Connect" : "Connect"}</button>`;
-        if (target === "phoneConnected") return `<h3>${isHindi ? "कनेक्शन स्थिति" : "Connection status"}</h3><div class="setting-row setting-result">📶 Campus Wi-Fi <strong>${state.wifiConnected ? (isHindi ? "जुड़ा हुआ" : "Connected") : (isHindi ? "तैयार" : "Ready")}</strong></div><button id="phoneConnected" class="workflow-action" type="button">${isHindi ? "स्थिति देखें" : "Check status"}</button>`;
-        if (target === "phoneDisplay") return `<h3>${isHindi ? "Display सेटिंग्स" : "Display settings"}</h3><button id="phoneDisplay" class="setting-row active-choice" type="button">☀️ ${isHindi ? "चमक" : "Brightness"} →</button>`;
-        if (target === "phoneBrightness") return `<h3>${isHindi ? "स्क्रीन की चमक" : "Screen brightness"}</h3><label>${isHindi ? "चमक" : "Brightness"}<input id="phoneBrightness" type="range" min="0" max="100" value="${state.brightness}" aria-label="${isHindi ? "स्क्रीन की चमक" : "Screen brightness"}"></label><p class="workflow-muted">${state.brightness}%</p>`;
-        if (target === "phoneBrightnessDone") return `<h3>${isHindi ? "नई चमक" : "New brightness"}</h3><div class="setting-row setting-result">☀️ ${isHindi ? "स्क्रीन स्तर" : "Screen level"}<strong>${state.brightness}%</strong></div><button id="phoneBrightnessDone" class="workflow-action" type="button">${isHindi ? "पूरा करें" : "Finish tutorial"}</button>`;
-        if (target === "phoneBluetooth") return `<h3>${isHindi ? "Connected devices" : "Connected devices"}</h3><button id="phoneBluetooth" class="setting-row active-choice" type="button">ᛒ Bluetooth <span>${state.bluetooth ? "On" : "Off"} →</span></button>`;
-        if (target === "phoneToggle") return `<h3>${isHindi ? "Bluetooth" : "Bluetooth"}</h3><button id="phoneToggle" class="workflow-action" type="button">${state.bluetooth ? (isHindi ? "बंद करें" : "Turn off") : (isHindi ? "चालू करें" : "Turn on")}</button>`;
-        return `<h3>Bluetooth</h3><div class="setting-row setting-result">ᛒ Bluetooth <strong>${state.bluetooth ? "On" : "Off"}</strong></div><button id="phoneBluetoothDone" class="workflow-action" type="button">${isHindi ? "पूरा करें" : "Finish tutorial"}</button>`;
+        guide.querySelector(".workflow-app-title").textContent = tr("Phone Settings Demo", "फोन Settings डेमो");
+        const topic = plan.topic || "";
+        const entry = topic === "brightness"
+            ? [tr("Display", "Display"), tr("Brightness, dark theme", "चमक, डार्क थीम")]
+            : topic === "bluetooth"
+                ? [tr("Connected devices", "Connected devices"), tr("Bluetooth, pairing", "Bluetooth, पेयरिंग")]
+                : [tr("Network and display settings", "नेटवर्क और डिस्प्ले सेटिंग्स"), tr("Wi-Fi, display", "Wi-Fi, डिस्प्ले")];
+        if (target === "phoneTutorialChoice") return `<h3>${tr("Which setting would you like to learn?", "किस सेटिंग के बारे में सीखेंगे?")}</h3><div id="phoneTutorialChoice" class="phone-tutorial-choices"><button type="button" data-phone-topic="wifi">📶 ${tr("Connect to Wi-Fi", "Wi-Fi जोड़ें")}</button><button type="button" data-phone-topic="brightness">☀️ ${tr("Adjust brightness", "चमक बदलें")}</button><button type="button" data-phone-topic="bluetooth">ᛒ ${tr("Turn Bluetooth on/off", "Bluetooth चालू/बंद करें")}</button></div>`;
+        if (target === "phoneSettings") return `<div class="phone-settings-screen"><div class="phone-status">9:41 ▪▪▪</div><h3>⚙️ Settings</h3><p>${tr("This is a simulated phone settings screen.", "यह फोन का सिम्युलेटेड Settings पेज है।")}</p><div class="setting-search">🔍 ${tr("Search settings", "सेटिंग खोजें")}</div><button id="phoneSettings" class="workflow-choice active-choice" type="button">${entry[0]} →<span>${entry[1]}</span></button><div class="setting-row setting-decoy">🔊 ${tr("Sound & vibration", "आवाज़ और वाइब्रेशन")} <span>›</span></div><div class="setting-row setting-decoy">🔋 ${tr("Battery", "बैटरी")} <span>›</span></div><div class="setting-row setting-decoy">🔔 ${tr("Notifications", "नोटिफ़िकेशन")} <span>›</span></div></div>`;
+        if (target === "phoneWifi") return phoneShell("Network &amp; Internet", `<button id="phoneWifi" class="setting-row active-choice" type="button"><span>📶 Wi-Fi</span><span>${tr("On", "चालू")} →</span></button><div class="setting-row setting-decoy">📡 ${tr("Mobile network", "मोबाइल नेटवर्क")} <span>›</span></div><div class="setting-row setting-decoy">🔥 ${tr("Hotspot & tethering", "हॉटस्पॉट")} <span>›</span></div><div class="setting-row setting-decoy">✈️ ${tr("Airplane mode", "एयरप्लेन मोड")} ${staticSwitch(false)}</div>`);
+        if (target === "phoneNetwork") return phoneShell("Wi-Fi", `<div class="setting-row setting-decoy">${tr("Use Wi-Fi", "Wi-Fi इस्तेमाल करें")} ${staticSwitch(true)}</div><p class="workflow-muted">${tr("Available networks", "उपलब्ध नेटवर्क")}</p><button id="phoneNetwork" class="setting-row active-choice" type="button">🔒 Campus Wi-Fi <span>▂▄▆</span></button><div class="setting-row setting-decoy">🔒 Home_Net_5G <span>▂▄</span></div><div class="setting-row setting-decoy">📶 Library_Guest <span>▂</span></div><p class="workflow-muted">${tr("This is a sample network.", "यह एक नमूना नेटवर्क है।")}</p>`);
+        if (target === "phoneConnect") return phoneShell("Campus Wi-Fi", `<label>${tr("Password (demo only)", "पासवर्ड (केवल डेमो)")}<input type="password" value="demo-password" disabled aria-readonly="true"></label><div class="setting-row setting-decoy">${tr("Show password", "पासवर्ड दिखाएँ")} <span>☐</span></div><p class="workflow-muted">${tr("The demo fills this in for you. Never share a real Wi-Fi password.", "डेमो इसे अपने आप भर देता है। असली Wi-Fi पासवर्ड कभी साझा न करें।")}</p><div class="dialog-actions"><span class="dialog-cancel">${tr("Cancel", "रद्द करें")}</span><button id="phoneConnect" class="workflow-action" type="button">Connect</button></div>`);
+        if (target === "phoneConnected") return phoneShell("Wi-Fi", `<div class="setting-row setting-result">📶 Campus Wi-Fi <strong>${state.wifiConnected ? tr("Connected", "जुड़ा हुआ") : tr("Ready", "तैयार")}</strong></div><p class="workflow-muted">${tr("Signal: Excellent · Link speed: 72 Mbps (demo)", "सिग्नल: बहुत अच्छा · स्पीड: 72 Mbps (डेमो)")}</p><button id="phoneConnected" class="workflow-action" type="button">${tr("Check status", "स्थिति देखें")}</button>`);
+        if (target === "phoneDisplay") return phoneShell(tr("Display settings", "Display सेटिंग्स"), `<button id="phoneDisplay" class="setting-row active-choice" type="button">☀️ ${tr("Brightness", "चमक")} →</button><div class="setting-row setting-decoy">🌙 ${tr("Dark theme", "डार्क थीम")} ${staticSwitch(false)}</div><div class="setting-row setting-decoy">🔠 ${tr("Font size", "फ़ॉन्ट आकार")} <span>›</span></div>`);
+        if (target === "phoneBrightness") return phoneShell(tr("Brightness", "चमक"), `<div class="slider-row"><span aria-hidden="true">🔅</span><input id="phoneBrightness" type="range" min="0" max="100" value="${state.brightness}" aria-label="${tr("Screen brightness", "स्क्रीन की चमक")}"><span aria-hidden="true">🔆</span></div><p class="workflow-muted">${state.brightness}%</p><div class="setting-row setting-decoy">🌗 ${tr("Adaptive brightness", "एडैप्टिव ब्राइटनेस")} ${staticSwitch(false)}</div>`);
+        if (target === "phoneBrightnessDone") return phoneShell(tr("Brightness", "चमक"), `<div class="setting-row setting-result">☀️ ${tr("Screen level", "स्क्रीन स्तर")}<strong>${state.brightness}%</strong></div><button id="phoneBrightnessDone" class="workflow-action" type="button">${tr("Finish tutorial", "पूरा करें")}</button>`);
+        if (target === "phoneBluetooth") return phoneShell("Connected devices", `<button id="phoneBluetooth" class="setting-row active-choice" type="button">ᛒ Bluetooth <span>${state.bluetooth ? "On" : "Off"} →</span></button><div class="setting-row setting-decoy">🎧 Demo Headphones <span>${tr("Saved", "सेव किया हुआ")}</span></div><div class="setting-row setting-decoy">➕ ${tr("Pair new device", "नया डिवाइस जोड़ें")} <span>›</span></div>`);
+        if (target === "phoneToggle") return phoneShell("Bluetooth", `<div class="setting-row"><span>${tr("Use Bluetooth", "Bluetooth इस्तेमाल करें")}</span>${simSwitch("phoneToggle", state.bluetooth, state.bluetooth ? tr("Turn off", "बंद करें") : tr("Turn on", "चालू करें"))}</div><p class="workflow-muted">${tr("When Bluetooth is on, your phone can find and connect to nearby devices.", "Bluetooth चालू होने पर फोन पास के डिवाइस ढूँढकर जुड़ सकता है।")}</p><p class="workflow-muted">${tr("Tap the switch to turn Bluetooth on or off.", "Bluetooth चालू या बंद करने के लिए स्विच दबाएँ।")}</p>`);
+        return phoneShell("Bluetooth", `<div class="setting-row setting-result">ᛒ Bluetooth <strong>${state.bluetooth ? "On" : "Off"}</strong></div><button id="phoneBluetoothDone" class="workflow-action" type="button">${tr("Finish tutorial", "पूरा करें")}</button>`);
     }
+
+    function renderUpiStage(target) {
+        guide.querySelector(".workflow-app-title").textContent = tr("Payments App Demo", "पेमेंट ऐप डेमो");
+        const amount = esc(state.upiAmount);
+        const frame = (inner) => `<div class="sim-phone"><div class="phone-status">9:41 ▪▪▪</div>${inner}</div>`;
+        if (target === "upiOpenApp") return frame(`<h3>${tr("Home screen", "होम स्क्रीन")}</h3><div class="app-grid"><button id="upiOpenApp" class="app-icon active-choice" type="button"><span>💳</span>${tr("Pay", "Pay")}</button><span class="app-icon setting-decoy"><span>📷</span>${tr("Camera", "कैमरा")}</span><span class="app-icon setting-decoy"><span>🖼️</span>${tr("Gallery", "गैलरी")}</span><span class="app-icon setting-decoy"><span>⚙️</span>${tr("Settings", "Settings")}</span></div>`);
+        if (target === "upiChooseMethod") return frame(`<h3>${tr("Pay", "भुगतान करें")}</h3><div class="setting-row setting-decoy">📷 ${tr("Scan any QR code", "कोई भी QR कोड स्कैन करें")} <span>›</span></div><div class="setting-row setting-decoy">👤 ${tr("Pay contacts", "संपर्कों को भुगतान")} <span>›</span></div><button id="upiChooseMethod" class="setting-row active-choice" type="button">🔢 ${tr("Pay UPI ID or number", "Pay UPI ID or number")} →</button><div class="setting-row setting-decoy">🏦 ${tr("Bank transfer", "बैंक ट्रांसफ़र")} <span>›</span></div>`);
+        if (target === "upiEnterId") return frame(`<h3>${tr("Pay UPI ID or number", "UPI ID या नंबर पर भुगतान")}</h3><label>${tr("UPI ID", "UPI ID")}<input id="upiEnterId" type="text" autocomplete="off" aria-label="UPI ID"></label><div class="payee-card">✅ <strong>Demo Shop</strong><span>${tr("Name registered with the bank. Always check this name before you pay.", "बैंक में दर्ज नाम। भुगतान से पहले हमेशा यह नाम जाँचें।")}</span></div>`);
+        if (target === "upiEnterAmount") return frame(`<h3>${tr("Paying Demo Shop", "Demo Shop को भुगतान")}</h3><label>${tr("Amount (₹)", "रकम (₹)")}<input id="upiEnterAmount" type="number" min="1" inputmode="decimal" aria-label="${tr("Amount in rupees", "रुपये में रकम")}"></label><label>${tr("Add a note (optional)", "नोट जोड़ें (वैकल्पिक)")}<input id="upiNote" type="text" autocomplete="off"></label>`);
+        if (target === "upiSelectAccount") return frame(`<h3>${tr("Pay ₹", "भुगतान ₹")}${amount}</h3><p class="workflow-muted">${tr("Pay from", "इस खाते से भुगतान")}</p><button id="upiSelectAccount" class="setting-row active-choice" type="button">🏦 Demo Bank ••1234 <span>${tr("Savings", "बचत")} ✓</span></button><div class="setting-row setting-decoy">🏦 Sample Bank ••5678 <span>${tr("Savings", "बचत")}</span></div>`);
+        if (target === "upiEnterPin") return frame(`<h3>${tr("Enter UPI PIN", "UPI PIN दर्ज करें")}</h3><div class="pin-dots" aria-hidden="true">● ● ● ●</div><p class="workflow-muted">${tr("Demo only: no PIN is typed or stored. In your real app, enter your own PIN privately and never tell it to anyone, not even a bank caller.", "केवल डेमो: कोई PIN टाइप या सेव नहीं होता। असली ऐप में अपना PIN खुद निजी तौर पर डालें और किसी को न बताएँ, बैंक का फोन करने वाले को भी नहीं।")}</p><button id="upiEnterPin" class="workflow-action" type="button">✓ ${tr("Confirm (demo)", "Confirm (डेमो)")}</button>`);
+        return frame(`<div class="success-card"><div class="success-mark">✅</div><h3>${tr("Payment successful", "भुगतान सफल")}</h3><p><strong>₹${amount}</strong> ${tr("paid to", "को भुगतान किया:")} Demo Shop</p><p class="workflow-muted">${tr("From Demo Bank ••1234 · Demo ref DEMO-0001", "Demo Bank ••1234 से · डेमो संदर्भ DEMO-0001")}</p></div><button id="upiSuccess" class="workflow-action" type="button">${tr("Done", "पूरा हुआ")}</button>`);
+    }
+
+    function renderEmailStage(target) {
+        guide.querySelector(".workflow-app-title").textContent = tr("Mail Demo", "Mail डेमो");
+        const composeButton = target === "emailCompose"
+            ? `<button id="emailCompose" class="mail-compose-btn" type="button">✏️ ${tr("Compose", "Compose")}</button>`
+            : `<span class="mail-compose-btn is-static">✏️ ${tr("Compose", "Compose")}</span>`;
+        const folders = `${composeButton}<div class="folder is-current">📥 ${tr("Inbox", "इनबॉक्स")} <b>2</b></div><div class="folder">⭐ ${tr("Starred", "स्टार वाले")}</div><div class="folder">📤 ${tr("Sent", "भेजे गए")}</div><div class="folder">📝 ${tr("Drafts", "ड्राफ़्ट")}</div>`;
+        const inbox = `<div class="mail-list"><div class="mail-row is-unread"><strong>Demo Teacher</strong><span>${tr("Assignment reminder", "असाइनमेंट रिमाइंडर")} — ${tr("please send yours by Friday", "कृपया शुक्रवार तक भेजें")}</span><time>9:12</time></div><div class="mail-row is-unread"><strong>Demo Bank</strong><span>${tr("Statement ready", "स्टेटमेंट तैयार")} — ${tr("sample message", "नमूना संदेश")}</span><time>${tr("Yesterday", "कल")}</time></div><div class="mail-row"><strong>Demo Library</strong><span>${tr("Book due soon", "किताब जल्द लौटानी है")}</span><time>${tr("Mon", "सोम")}</time></div></div>`;
+        const shell = (main, dim) => `<div class="sim-mail"><div class="mail-top"><strong>✉️ ${tr("Mail", "मेल")}</strong><span class="mail-search">🔍 ${tr("Search mail", "मेल खोजें")}</span><span aria-hidden="true">👤</span></div><div class="mail-body"><aside class="mail-folders">${folders}</aside><div class="mail-main${dim ? " is-dimmed" : ""}">${main}</div></div></div>`;
+        if (target === "emailCompose") return shell(`<h3>${tr("Inbox", "इनबॉक्स")}</h3>${inbox}`, false);
+        if (target === "emailSent") return shell(`<h3>${tr("Inbox", "इनबॉक्स")}</h3>${inbox}<div class="snackbar"><span>✅ ${tr("Message sent", "संदेश भेज दिया गया")} · ${tr("To", "प्राप्तकर्ता")}: ${esc(state.emailTo)} · 📎 ${state.emailAttached ? "Assignment.pdf" : tr("no attachment", "कोई अटैचमेंट नहीं")}</span><button id="emailSent" class="workflow-action" type="button">${tr("Done", "पूरा हुआ")}</button></div>`, false);
+        const chip = state.emailAttached ? `<div class="attach-chip">📎 Assignment.pdf <span>240 KB</span></div>` : "";
+        const attachHint = state.emailAttached ? "" : `<p class="workflow-muted">${tr("Demo file available: Assignment.pdf (240 KB)", "डेमो फ़ाइल उपलब्ध: Assignment.pdf (240 KB)")}</p>`;
+        return shell(`<h3>${tr("Inbox", "इनबॉक्स")}</h3>${inbox}<div class="compose-window"><div class="compose-title"><span>${tr("New Message", "नया संदेश")}</span><span aria-hidden="true">— ✕</span></div><div class="compose-form"><label>${tr("To", "To")}<input id="emailTo" type="email" autocomplete="off" aria-label="${tr("Recipient email address", "पाने वाले का ईमेल पता")}"></label><label>${tr("Subject", "Subject")}<input id="emailSubject" type="text" autocomplete="off"></label><label>${tr("Message", "संदेश")}<textarea id="emailBody" rows="4"></textarea></label>${chip}${attachHint}<div class="compose-actions"><button id="emailSend" class="workflow-action" type="button">➤ ${tr("Send", "Send")}</button><button id="emailAttach" class="workflow-action" type="button">📎 ${tr("Attach files", "Attach files")}</button></div></div></div>`, true);
+    }
+
+    function renderChatStage(target) {
+        guide.querySelector(".workflow-app-title").textContent = tr("Chat App Demo", "चैट ऐप डेमो");
+        const frame = inner => `<div class="sim-phone"><div class="phone-status">9:41 ▪▪▪</div>${inner}</div>`;
+        const tiles = [["🌄", "Sunset"], ["🌳", "Garden"], ["🍰", "Cake"], ["📚", "Books"]];
+        const received = `<div class="chat-bubble received">${tr("Hi! Send me the photo from today?", "नमस्ते! आज वाली फोटो भेजोगे?")}</div>`;
+        if (target === "chatOpenChat") return frame(`<h3>${tr("Chats", "चैट")}</h3><button id="chatOpenChat" class="setting-row active-choice" type="button">🟢 Demo Friend <span>${tr("Hi! Send me the photo…", "नमस्ते! फोटो भेजो…")}</span></button><div class="setting-row setting-decoy">👥 Demo Family Group <span>${tr("Dinner at 8?", "डिनर 8 बजे?")}</span></div><div class="setting-row setting-decoy">🎓 Demo Class Group <span>${tr("Notes uploaded", "नोट्स अपलोड हुए")}</span></div>`);
+        if (target === "chatAttach") return frame(`<h3>Demo Friend</h3><div class="chat-thread">${received}</div><div class="chat-input-bar"><span class="chat-field">${tr("Type a message", "संदेश लिखें")}</span><button id="chatAttach" class="chat-icon active-choice" type="button" aria-label="${tr("Attach", "Attach")}">📎</button></div>`);
+        if (target === "chatGallery") return frame(`<h3>${tr("Attach", "Attach करें")}</h3><div class="attach-menu"><button id="chatGallery" class="app-icon active-choice" type="button"><span>🖼️</span>${tr("Gallery", "Gallery")}</button><span class="app-icon setting-decoy"><span>📷</span>${tr("Camera", "कैमरा")}</span><span class="app-icon setting-decoy"><span>📄</span>${tr("Document", "डॉक्यूमेंट")}</span><span class="app-icon setting-decoy"><span>📍</span>${tr("Location", "लोकेशन")}</span></div>`);
+        if (target === "chatPickPhoto") return frame(`<h3>${tr("Gallery", "Gallery")}</h3><div class="photo-grid">${tiles.map(([emoji, name], index) => index === 0
+            ? `<button id="chatPickPhoto" class="photo-tile active-choice" type="button"><span>${emoji}</span>${name}</button>`
+            : `<span class="photo-tile setting-decoy"><span>${emoji}</span>${name}</span>`).join("")}</div>`);
+        if (target === "chatCaption") return frame(`<h3>${tr("Send photo", "फोटो भेजें")}</h3><div class="photo-preview">🌄 Sunset</div><label>${tr("Add a caption", "कैप्शन जोड़ें")}<input id="chatCaption" type="text" autocomplete="off"></label>`);
+        if (target === "chatSend") return frame(`<h3>${tr("Send photo", "फोटो भेजें")}</h3><div class="photo-preview">🌄 Sunset</div><p class="workflow-muted">${esc(state.chatCaption)}</p><button id="chatSend" class="workflow-action" type="button">➤ ${tr("Send", "Send")}</button>`);
+        return frame(`<h3>Demo Friend</h3><div class="chat-thread">${received}<div class="chat-bubble sent"><div class="photo-preview small">🌄 Sunset</div>${esc(state.chatCaption)}<span class="ticks">✓✓</span></div></div><p class="workflow-muted">${tr("Two ticks mean the message was delivered.", "दो टिक का मतलब है कि संदेश पहुँच गया।")}</p><button id="chatSent" class="workflow-action" type="button">${tr("Done", "पूरा हुआ")}</button>`);
+    }
+
+    const fieldMap = {
+        trainClass: "travelClass", trainQuota: "quota", passengerGender: "passengerGender", passengerBerth: "passengerBerth",
+        documentYear: "documentYear", upiEnterId: "upiId", upiEnterAmount: "upiAmount", upiNote: "upiNote",
+        emailTo: "emailTo", emailSubject: "emailSubject", emailBody: "emailBody", chatCaption: "chatCaption"
+    };
 
     function renderStage() {
         const step = plan.steps[currentStep];
@@ -1110,6 +1286,9 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
         feedback.textContent = "";
         if (plan.category === "train_booking") screen.innerHTML = renderTrainStage(target);
         else if (plan.category === "document_download") screen.innerHTML = renderDocumentStage(target);
+        else if (plan.category === "upi_payment") screen.innerHTML = renderUpiStage(target);
+        else if (plan.category === "email_attachment") screen.innerHTML = renderEmailStage(target);
+        else if (plan.category === "chat_message") screen.innerHTML = renderChatStage(target);
         else screen.innerHTML = renderPhoneStage(target);
 
         const highlighted = guide.querySelector(`#${target}`);
@@ -1129,6 +1308,10 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
         if (ageInput) ageInput.value = state.passengerAge;
         if (documentCategory) documentCategory.value = state.documentType;
         if (brightness) brightness.value = state.brightness;
+        Object.entries(fieldMap).forEach(([id, key]) => {
+            const field = screen.querySelector(`#${id}`);
+            if (field) field.value = state[key];
+        });
         documentCategory?.addEventListener("change", () => { state.documentType = documentCategory.value; });
         brightness?.addEventListener("input", () => { state.brightness = Number(brightness.value); });
         screen.querySelectorAll("[data-phone-topic]").forEach(button => button.addEventListener("click", () => {
@@ -1158,6 +1341,10 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
         if (category) state.documentType = category.value;
         const brightness = screen.querySelector("#phoneBrightness");
         if (brightness) state.brightness = Number(brightness.value);
+        Object.entries(fieldMap).forEach(([id, key]) => {
+            const field = screen.querySelector(`#${id}`);
+            if (field && typeof field.value === "string") state[key] = key === "emailBody" ? field.value : field.value.trim();
+        });
     }
 
     function finishWorkflow() {
@@ -1167,7 +1354,13 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
             ? (isHindi ? "सिम्युलेटेड यात्रा पूरी हुई। कोई वास्तविक टिकट बुक या भुगतान नहीं हुआ।" : "Simulated journey complete. No real ticket was booked or paid for.")
             : plan.category === "document_download"
                 ? (isHindi ? "डेमो पूरा हुआ। कोई वास्तविक संस्थागत दस्तावेज़ डाउनलोड नहीं हुआ।" : "Demo complete. No real institutional document was downloaded.")
-                : (isHindi ? "ट्यूटोरियल पूरा हुआ। आपके फोन की वास्तविक सेटिंग नहीं बदली।" : "Tutorial complete. Your actual phone settings were not changed.");
+                : plan.category === "upi_payment"
+                    ? (isHindi ? "डेमो पूरा हुआ। कोई वास्तविक पैसा नहीं भेजा गया और कोई PIN दर्ज नहीं हुआ।" : "Demo complete. No real money was sent and no PIN was entered.")
+                    : plan.category === "email_attachment"
+                        ? (isHindi ? "डेमो पूरा हुआ। कोई वास्तविक ईमेल नहीं भेजा गया।" : "Demo complete. No real email was sent.")
+                        : plan.category === "chat_message"
+                            ? (isHindi ? "डेमो पूरा हुआ। कोई वास्तविक संदेश या फोटो नहीं भेजी गई।" : "Demo complete. No real message or photo was sent.")
+                            : (isHindi ? "ट्यूटोरियल पूरा हुआ। आपके फोन की वास्तविक सेटिंग नहीं बदली।" : "Tutorial complete. Your actual phone settings were not changed.");
         screen.innerHTML = `<div class="workflow-complete"><div class="raasta-avatar">🎉</div><h3>${isHindi ? "बहुत बढ़िया!" : "Nicely done!"}</h3><p>${message}</p><button id="workflowAgain" class="workflow-action" type="button">↻ ${isHindi ? "फिर से शुरू करें" : "Start again"}</button></div>`;
         guide.querySelector("#workflowAgain").onclick = restartWorkflow;
         instruction.textContent = isHindi ? "सभी सिम्युलेटेड चरण पूरे हुए।" : "All simulated steps are complete.";
@@ -1187,11 +1380,21 @@ function showWorkflowGuide(task, originalPlan, startingStep = 0) {
             feedback.textContent = isHindi ? "कृपया दस्तावेज़ की श्रेणी चुनें।" : "Please choose a document category.";
             return;
         }
+        const needs = (ok, english, hindi) => {
+            if (ok) return false;
+            feedback.textContent = isHindi ? hindi : english;
+            return true;
+        };
+        if (target === "upiEnterId" && needs(/^[\w.\-]{2,}@[A-Za-z][\w]{1,}$/.test(state.upiId), "Enter a UPI ID in the form name@bank.", "UPI ID को name@bank के रूप में लिखें।")) return;
+        if (target === "upiEnterAmount" && needs(Number(state.upiAmount) > 0, "Enter an amount greater than zero.", "शून्य से ज़्यादा रकम दर्ज करें।")) return;
+        if (target === "emailTo" && needs(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.emailTo), "Enter a valid email address such as name@example.com.", "name@example.com जैसा सही ईमेल पता दर्ज करें।")) return;
+        if (target === "emailSubject" && needs(state.emailSubject.length > 0, "Add a short subject so the receiver knows what the email is about.", "छोटा Subject जोड़ें ताकि पाने वाला समझ सके कि ईमेल किस बारे में है।")) return;
+        if (target === "emailAttach") state.emailAttached = true;
         if (target === "trainSearch") state.searched = true;
         if (target === "trainSelect") state.selectedTrain ||= "Intercity Express";
         if (target === "phoneConnect") state.wifiConnected = true;
         if (target === "phoneToggle") state.bluetooth = !state.bluetooth;
-        if (target === "bookingConfirm" || target === "documentDownload" || target === "phoneConnected" || target === "phoneBrightnessDone" || target === "phoneBluetoothDone") {
+        if (["bookingConfirm", "documentDownload", "phoneConnected", "phoneBrightnessDone", "phoneBluetoothDone", "upiSuccess", "emailSent", "chatSent"].includes(target)) {
             finishWorkflow();
             return;
         }
@@ -1373,7 +1576,7 @@ function showGuide(task, plan = null, startingStep = 0) {
         return;
     }
 
-    if (plan && ["train_booking", "document_download", "smartphone_basics"].includes(plan.category)) {
+    if (plan && ["train_booking", "document_download", "smartphone_basics", "upi_payment", "email_attachment", "chat_message"].includes(plan.category)) {
         showWorkflowGuide(task, plan, startingStep);
         return;
     }
@@ -1470,20 +1673,29 @@ function showGuide(task, plan = null, startingStep = 0) {
             </div>
             <div class="guide-layout">
                 <div class="portal">
-                    <div class="portal-header"><strong>🎓 ${isHindi ? "छात्र पोर्टल" : "Student Portal"}</strong><span>${isHindi ? "डेमो छात्र खाता" : "Demo Student Account"}</span></div>
+                    <div class="portal-header"><strong>🎓 ${isHindi ? "छात्र पोर्टल" : "Student Portal"}</strong><span>${isHindi ? "डेमो छात्र खाता · नामांकन DEMO-2025-0042 · सेमेस्टर 1" : "Demo Student Account · Enrolment DEMO-2025-0042 · Semester 1"}</span></div>
                     <div class="portal-body">
                         <aside class="portal-sidebar">
                             <p>${isHindi ? "मुख्य मेन्यू" : "MAIN MENU"}</p>
-                            <button class="portal-option" type="button">🏠 ${isHindi ? "डैशबोर्ड" : "Dashboard"}</button>
+                            <button class="portal-option nav-current" id="portalNavDashboard" type="button">🏠 ${isHindi ? "डैशबोर्ड" : "Dashboard"}</button>
                             <button class="portal-option" type="button">👤 ${isHindi ? "मेरी प्रोफ़ाइल" : "My Profile"}</button>
                             <button class="portal-option" id="portalDocuments" type="button">📁 ${isHindi ? "दस्तावेज़" : "Documents"}</button>
                             <button class="portal-option" type="button">💳 ${isHindi ? "फीस विवरण" : "Fee Details"}</button>
+                            <button class="portal-option" type="button">📝 ${isHindi ? "परीक्षा" : "Examinations"}</button>
+                            <button class="portal-option" type="button">📚 ${isHindi ? "पुस्तकालय" : "Library"}</button>
                         </aside>
                         <div class="portal-main">
+                            <div id="portalDashboardPage">
+                                <h3>${isHindi ? "वापसी पर स्वागत है, Demo Student" : "Welcome back, Demo Student"}</h3><p>${isHindi ? "सेमेस्टर 1 · शैक्षणिक वर्ष 2025–26" : "Semester 1 · Academic year 2025–26"}</p>
+                                <div class="stat-row"><div class="stat"><strong>86%</strong><span>${isHindi ? "उपस्थिति (डेमो)" : "Attendance (demo)"}</span></div><div class="stat"><strong>₹0</strong><span>${isHindi ? "बकाया फीस (डेमो)" : "Fees due (demo)"}</span></div><div class="stat"><strong>2</strong><span>${isHindi ? "नई सूचनाएँ" : "New notices"}</span></div></div>
+                                <div class="document-card"><div class="document-icon">📢</div><div><strong>${isHindi ? "सूचना" : "Notice"}</strong><p>${isHindi ? "मध्य-सेमेस्टर परीक्षा का कार्यक्रम जल्द प्रकाशित होगा। (नमूना)" : "Mid-semester exam schedule will be published soon. (sample)"}</p></div></div>
+                            </div>
+                            <div id="portalDocsPage" hidden>
                             <h3>${isHindi ? "मेरे दस्तावेज़" : "My Documents"}</h3><p>${isHindi ? "अपने कॉलेज के दस्तावेज़ यहाँ देखें।" : "Manage your college documents here."}</p>
                             <div class="document-card"><div class="document-icon">📄</div><div><strong>${isHindi ? "फीस रसीदें" : "Fee Receipts"}</strong><p>${isHindi ? "भुगतान की रसीदें देखें" : "View your payment receipts"}</p></div><button id="portalReceipts" class="portal-action" type="button">${isHindi ? "खोलें →" : "Open →"}</button></div>
                             <div class="document-card"><div class="document-icon">📋</div><div><strong>${isHindi ? "शैक्षणिक दस्तावेज़" : "Academic Documents"}</strong><p>${isHindi ? "अपने शैक्षणिक रिकॉर्ड देखें" : "View your academic records"}</p></div><button class="portal-action" type="button" disabled>${isHindi ? "खोलें →" : "Open →"}</button></div>
-                            <div class="receipt-box" id="receiptBox"><h3>${isHindi ? "फीस रसीद - सेमेस्टर 1" : "Fee Receipt - Semester 1"}</h3><p>${isHindi ? "छात्र: डेमो छात्र" : "Student: Demo Student"}</p><p>${isHindi ? "स्थिति: डेमो भुगतान रिकॉर्ड" : "Status: Demo payment record"}</p><button id="portalDownload" class="download-action" type="button">⬇ ${isHindi ? "रसीद डाउनलोड करें" : "Download Receipt"}</button></div>
+                            <div class="receipt-box" id="receiptBox"><h3>${isHindi ? "फीस रसीद - सेमेस्टर 1" : "Fee Receipt - Semester 1"}</h3><p>${isHindi ? "छात्र: डेमो छात्र" : "Student: Demo Student"}</p><p>${isHindi ? "स्थिति: डेमो भुगतान रिकॉर्ड" : "Status: Demo payment record"}</p><dl class="workflow-summary"><dt>${isHindi ? "रसीद संख्या" : "Receipt no."}</dt><dd>DEMO-FR-0001</dd><dt>${isHindi ? "भुगतान की तारीख" : "Payment date"}</dt><dd>12 Aug 2025</dd><dt>${isHindi ? "शैक्षणिक वर्ष" : "Academic year"}</dt><dd>2025–26</dd><dt>${isHindi ? "रकम (डेमो)" : "Amount (demo)"}</dt><dd>₹ 45,000</dd><dt>${isHindi ? "भुगतान का तरीका" : "Payment mode"}</dt><dd>${isHindi ? "ऑनलाइन (डेमो)" : "Online (demo)"}</dd><dt>${isHindi ? "स्थिति" : "Status"}</dt><dd>${isHindi ? "भुगतान हुआ" : "Paid"}</dd></dl><button id="portalDownload" class="download-action" type="button">⬇ ${isHindi ? "रसीद डाउनलोड करें" : "Download Receipt"}</button></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1527,6 +1739,15 @@ function showGuide(task, plan = null, startingStep = 0) {
         next.textContent = currentStep === steps.length - 1 ? (isHindi ? "समाप्त ✓" : "Finish ✓") : (isHindi ? "अगला →" : "Next →");
         targetIds.forEach(id => guide.querySelector(`#${id}`).classList.remove("active-target"));
         guide.querySelector(`#${steps[currentStep].target}`).classList.add("active-target");
+        const onDashboard = steps[currentStep].target === "portalDocuments";
+        const dashboardPage = guide.querySelector("#portalDashboardPage");
+        const docsPage = guide.querySelector("#portalDocsPage");
+        if (dashboardPage) dashboardPage.hidden = !onDashboard;
+        if (docsPage) docsPage.hidden = onDashboard;
+        const dashboardNav = guide.querySelector("#portalNavDashboard");
+        const documentsNav = guide.querySelector("#portalDocuments");
+        if (dashboardNav) { if (onDashboard) dashboardNav.classList.add("nav-current"); else dashboardNav.classList.remove("nav-current"); }
+        if (documentsNav) { if (onDashboard) documentsNav.classList.remove("nav-current"); else documentsNav.classList.add("nav-current"); }
         if (steps[currentStep].target === "portalDownload") {
             guide.querySelector("#receiptBox").classList.add("receipt-visible");
         }

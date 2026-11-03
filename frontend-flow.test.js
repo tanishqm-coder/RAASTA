@@ -192,6 +192,9 @@ const universalGuidePlan = {
 const workflowTargets = {
     train_booking: ["trainSource", "trainDestination", "trainDate", "trainSearch", "trainSelect", "trainPassenger", "trainReview", "bookingConfirm"],
     document_download: ["documentOpen", "documentCategory", "documentSample", "documentPreview", "documentDownload"],
+    upi_payment: ["upiOpenApp", "upiChooseMethod", "upiEnterId", "upiEnterAmount", "upiSelectAccount", "upiEnterPin", "upiSuccess"],
+    email_attachment: ["emailCompose", "emailTo", "emailSubject", "emailBody", "emailAttach", "emailSend", "emailSent"],
+    chat_message: ["chatOpenChat", "chatAttach", "chatGallery", "chatPickPhoto", "chatCaption", "chatSend", "chatSent"],
     wifi: ["phoneSettings", "phoneWifi", "phoneNetwork", "phoneConnect", "phoneConnected"],
     brightness: ["phoneSettings", "phoneDisplay", "phoneBrightness", "phoneBrightnessDone"],
     bluetooth: ["phoneSettings", "phoneBluetooth", "phoneToggle", "phoneBluetoothDone"]
@@ -223,7 +226,10 @@ test("the four homepage demo examples populate the existing task input without s
         "I want to download my fee receipt.",
         "Mujhe Jaipur se Delhi ki train book karni hai.",
         "I want to download my bonafide certificate.",
-        "Mujhe Bluetooth on karna hai."
+        "Mujhe Bluetooth on karna hai.",
+        "Mujhe UPI se paise bhejne hain.",
+        "I want to send an email with an attachment.",
+        "Mujhe WhatsApp par photo bhejni hai."
     ];
     for (const example of examples) assert.ok(html.includes(`data-task="${example}"`), example);
     assert.equal(frontend.demoExamples.length, 4);
@@ -584,9 +590,14 @@ test("train booking simulation supports route entry, date, search, selection, pa
     next.onclick();
     frontend.getNode("workflow:#trainDate").value = "2027-01-10";
     next.onclick();
-    assert.match(screen.innerHTML, /Udaipur → Agra/);
+    // The journey form keeps the entered route and date in its fields while searching.
+    assert.equal(frontend.getNode("workflow:#trainSource").value, "Udaipur");
+    assert.equal(frontend.getNode("workflow:#trainDestination").value, "Agra");
+    assert.equal(frontend.getNode("workflow:#trainDate").value, "2027-01-10");
+    assert.match(screen.innerHTML, /Book Ticket/);
     frontend.getNode("workflow:#trainSearch").onclick();
     assert.match(screen.innerHTML, /Intercity Express/);
+    assert.match(screen.innerHTML, /Udaipur → Agra/);
     frontend.getNode("workflow:#trainSelect").onclick();
     frontend.getNode("workflow:#passengerName").value = "Demo Learner";
     frontend.getNode("workflow:#passengerAge").value = "21";
@@ -598,7 +609,7 @@ test("train booking simulation supports route entry, date, search, selection, pa
     assert.match(screen.innerHTML, /No real ticket was booked/);
 
     guide.querySelector("#workflowAgain").onclick();
-    assert.match(screen.innerHTML, /Where will you start/);
+    assert.match(screen.innerHTML, /Book Ticket/);
     assert.equal(guide.querySelector(".workflow-instruction").textContent, "Step 1: use trainSource.");
 });
 
@@ -613,7 +624,8 @@ test("document download simulation asks for a category, previews a sample and co
     assert.equal(frontend.getNode("guide:.progress-bar").attributes["aria-valuenow"], "20");
 
     frontend.getNode("workflow:#documentOpen").onclick();
-    assert.match(screen.innerHTML, /Choose a document category/);
+    assert.match(screen.innerHTML, /My Documents/);
+    assert.match(screen.innerHTML, /Select a category/);
     assert.equal(guide.querySelector(".workflow-step-title").textContent, "Choose a document category");
     assert.equal(frontend.getNode("guide:.progress-bar").attributes["aria-valuenow"], "40");
     frontend.getNode("workflow:#documentCategory").value = "marksheet";
@@ -646,7 +658,8 @@ test("Guide me routes a local document request into the interactive document wor
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(frontend.guide.style.display, "block");
     assert.equal(frontend.guide.querySelector("#workflowNext").disabled, false);
-    assert.match(frontend.getNode("guide:.workflow-screen").innerHTML, /simulated documents/i);
+    assert.match(frontend.getNode("guide:.workflow-screen").innerHTML, /Student Portal/);
+    assert.match(frontend.getNode("guide:.workflow-screen").innerHTML, /Welcome back, Demo Student/);
     assert.match(frontend.nodes.get("taskStatus").textContent, /local example/i);
 });
 
@@ -1074,4 +1087,95 @@ test("new Hindi playback cancels the prior request and guide navigation stops ac
     frontend.guide.querySelector("#visualNext").onclick();
     assert.equal(audio.paused, true);
     assert.deepEqual(frontend.revokedUrls, ["blob:raasta-1", "blob:raasta-2"]);
+});
+
+
+test("UPI payment demo validates the UPI ID and amount, never types a PIN, and finishes safely", async () => {
+    const frontend = await loadFrontend();
+    const plan = makeWorkflowPlan("upi_payment");
+    frontend.context.showGuide(plan.task, plan, 0);
+    const guide = frontend.guide;
+    const screen = frontend.getNode("guide:.workflow-screen");
+    const next = guide.querySelector("#workflowNext");
+    const feedback = () => guide.querySelector(".workflow-feedback").textContent;
+    assert.match(guide.innerHTML, /No real money is sent/);
+    assert.match(screen.innerHTML, /Home screen/);
+    next.onclick();
+    next.onclick();
+    assert.equal(guide.querySelector(".workflow-instruction").textContent, "Step 3: use upiEnterId.");
+    frontend.getNode("workflow:#upiEnterId").value = "not a upi id";
+    next.onclick();
+    assert.match(feedback(), /name@bank/);
+    assert.equal(guide.querySelector(".workflow-instruction").textContent, "Step 3: use upiEnterId.");
+    frontend.getNode("workflow:#upiEnterId").value = "shop@demobank";
+    next.onclick();
+    frontend.getNode("workflow:#upiEnterAmount").value = "0";
+    next.onclick();
+    assert.match(feedback(), /greater than zero/);
+    frontend.getNode("workflow:#upiEnterAmount").value = "250";
+    next.onclick();
+    next.onclick();
+    assert.match(screen.innerHTML, /no PIN is typed or stored/);
+    next.onclick();
+    assert.match(screen.innerHTML, /₹250/);
+    frontend.getNode("workflow:#upiSuccess").onclick();
+    assert.match(screen.innerHTML, /No real money was sent and no PIN was entered/);
+});
+
+test("email demo requires a valid recipient and subject, attaches the sample file, and completes without sending", async () => {
+    const frontend = await loadFrontend();
+    const plan = makeWorkflowPlan("email_attachment");
+    frontend.context.showGuide(plan.task, plan, 0);
+    const guide = frontend.guide;
+    const screen = frontend.getNode("guide:.workflow-screen");
+    const next = guide.querySelector("#workflowNext");
+    const feedback = () => guide.querySelector(".workflow-feedback").textContent;
+    assert.match(guide.innerHTML, /No real email is sent/);
+    assert.match(screen.innerHTML, /Compose/);
+    next.onclick();
+    frontend.getNode("workflow:#emailTo").value = "not-an-address";
+    next.onclick();
+    assert.match(feedback(), /valid email address/);
+    frontend.getNode("workflow:#emailTo").value = "teacher@example.com";
+    next.onclick();
+    frontend.getNode("workflow:#emailSubject").value = "";
+    next.onclick();
+    assert.match(feedback(), /subject/i);
+    frontend.getNode("workflow:#emailSubject").value = "Assignment";
+    next.onclick();
+    next.onclick();
+    assert.match(screen.innerHTML, /Demo file available/);
+    next.onclick();
+    assert.match(screen.innerHTML, /attach-chip/);
+    assert.match(screen.innerHTML, /Assignment\.pdf/);
+    next.onclick();
+    assert.match(screen.innerHTML, /Message sent/);
+    assert.match(screen.innerHTML, /teacher@example\.com/);
+    frontend.getNode("workflow:#emailSent").onclick();
+    assert.match(screen.innerHTML, /No real email was sent/);
+});
+
+test("chat demo walks through attach, gallery, photo, caption and send, and completes without sending anything", async () => {
+    const frontend = await loadFrontend();
+    const plan = makeWorkflowPlan("chat_message");
+    frontend.context.showGuide(plan.task, plan, 0);
+    const guide = frontend.guide;
+    const screen = frontend.getNode("guide:.workflow-screen");
+    const next = guide.querySelector("#workflowNext");
+    assert.match(guide.innerHTML, /No real message or photo is sent/);
+    assert.match(screen.innerHTML, /Demo Friend/);
+    next.onclick();
+    assert.match(screen.innerHTML, /chatAttach/);
+    next.onclick();
+    assert.match(screen.innerHTML, /Gallery/);
+    next.onclick();
+    assert.match(screen.innerHTML, /photo-grid/);
+    next.onclick();
+    frontend.getNode("workflow:#chatCaption").value = "Happy birthday!";
+    next.onclick();
+    assert.match(screen.innerHTML, /Happy birthday!/);
+    next.onclick();
+    assert.match(screen.innerHTML, /✓✓/);
+    frontend.getNode("workflow:#chatSent").onclick();
+    assert.match(screen.innerHTML, /No real message or photo was sent/);
 });

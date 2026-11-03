@@ -85,7 +85,17 @@ function hasPhoneTopicAction(topic, text) {
     return false;
 }
 
-/** Classifies only the four simulated journeys Raasta can safely demonstrate. */
+// Patterns for the UPI payment, email-with-attachment and chat-message demos.
+const upiNamePattern = /\b(?:upi|gpay|g\s*pay|google\s*pay|phone\s*pe|phonepe|paytm|bhim)\b|यूपीआई|जीपे|फोनपे|पेटीएम|भीम/u;
+const upiPayActionPattern = /\b(?:pay|paying|payment|send|transfer|bhej\w*|bhugtan|karna|karni|karo|kaise|how)\b|भेज|भुगतान|पेमेंट|कैसे|करना|करनी/u;
+const sendMoneyPattern = /\b(?:send\s+money|money\s+transfer|pay\s+(?:someone|a\s+shop|shopkeeper|a\s+friend|my\s+friend)|scan\s+(?:a\s+|the\s+)?qr|qr\s*code\s+(?:se\s+)?pay|paise\s+bhej\w*|paisa\s+bhej\w*|payment\s+kar\w*|pay\s+kar\w*)\b|पैसे\s+भेज|पैसा\s+भेज|क्यूआर\s*कोड\s*(?:से\s*)?(?:पे|भुगतान)/u;
+const emailNamePattern = /\b(?:e-?mails?|gmail|mails?)\b|ईमेल|जीमेल|मेल\s*(?:भेज|लिख)/u;
+const emailActionPattern = /\b(?:send|compose|write|attach(?:ment|ments)?|bhej\w*|likh\w*|forward|reply)\b|भेज|लिख|अटैच|संलग्न|कैसे/u;
+const chatNamePattern = /\b(?:whats\s*app|whatsap+|watsapp|wa\s*chat)\b|व्हाट्सएप|व्हाट्सऐप|वॉट्सऐप|वाट्सएप|व्हाट्सअप/u;
+const chatActionPattern = /\b(?:send|share|message|msg|text|photo|photos|picture|pic|image|bhej\w*|chat|forward)\b|भेज|मैसेज|संदेश|फोटो|तस्वीर|शेयर/u;
+const riskyMessagingPattern = /\b(?:delete|backup|restore|hack|spy|track|recover|banned?|block(?:ed)?|privacy|password|otp)\b|हैक|जासूसी|पासवर्ड/u;
+
+/** Classifies the simulated journeys Raasta can safely demonstrate. */
 export function classifyRaastaTask(task, language = "en") {
     const text = normalizeSpeechTranscript(task).toLocaleLowerCase();
     const hasReceiptArtifact = /\b(?:receipt|proof|confirmation|voucher)\b|रसीद|पर्ची|प्रमाण/u.test(text);
@@ -110,6 +120,17 @@ export function classifyRaastaTask(task, language = "en") {
             text.match(/\b([\p{L}]+)\s+se\s+([\p{L}]+)\s+ki\s+train/u) ||
             text.match(/([\p{Script=Devanagari}]+)\s+से\s+([\p{Script=Devanagari}]+)\s+की\s+ट्रेन/u);
         return { category: "train_booking", supported: true, source: route?.[1]?.trim() || "", destination: route?.[2]?.trim() || "", topic: null };
+    }
+    if (!riskyMessagingPattern.test(text) && !hasReceiptArtifact) {
+        if ((upiNamePattern.test(text) && upiPayActionPattern.test(text)) || sendMoneyPattern.test(text)) {
+            return { category: "upi_payment", supported: true, topic: null, documentType: null };
+        }
+        if (chatNamePattern.test(text) && chatActionPattern.test(text)) {
+            return { category: "chat_message", supported: true, topic: null, documentType: null };
+        }
+        if (emailNamePattern.test(text) && emailActionPattern.test(text)) {
+            return { category: "email_attachment", supported: true, topic: null, documentType: null };
+        }
     }
     if (receiptIntent === "unrelated" && hasReceiptArtifact) {
         return { category: "unsupported", supported: false, clarifyingQuestion: language === "hi"

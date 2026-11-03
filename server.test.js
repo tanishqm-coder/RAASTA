@@ -1153,3 +1153,42 @@ test("optional live Gemini hostel request reports actual API and backend timings
     assert.ok(timing, "expected backend timing log");
     console.info(`[live-gemini-result] ${timing}`);
 });
+
+test("Demo Mode returns validated seven-step plans for the UPI, email and chat demos in both languages", async t => {
+    const server = await startTestServer({ apiKey: "configured-test-key", response: new Error("Gemini must not be called in Demo Mode") });
+    t.after(server.close);
+    const expected = {
+        upi_payment: ["upiOpenApp", "upiChooseMethod", "upiEnterId", "upiEnterAmount", "upiSelectAccount", "upiEnterPin", "upiSuccess"],
+        email_attachment: ["emailCompose", "emailTo", "emailSubject", "emailBody", "emailAttach", "emailSend", "emailSent"],
+        chat_message: ["chatOpenChat", "chatAttach", "chatGallery", "chatPickPhoto", "chatCaption", "chatSend", "chatSent"]
+    };
+    const cases = [
+        ["I want to send money using UPI.", "en", "upi_payment"],
+        ["Mujhe UPI se paise bhejne hain.", "hi", "upi_payment"],
+        ["I want to send an email with an attachment.", "en", "email_attachment"],
+        ["मुझे ईमेल भेजना है।", "hi", "email_attachment"],
+        ["Send a photo on WhatsApp.", "en", "chat_message"],
+        ["Mujhe WhatsApp par photo bhejni hai.", "hi", "chat_message"]
+    ];
+    for (const [task, language, category] of cases) {
+        const response = await server.postTask(task, language, { demoMode: true });
+        const body = await response.json();
+        assert.equal(response.status, 200, task);
+        assert.equal(body.supported, true, task);
+        assert.equal(body.category, category, task);
+        assert.deepEqual(body.steps.map(step => step.targetElementId), expected[category], task);
+        assert.ok(body.steps.every(step => typeof step.instruction === "string" && step.instruction.length > 3), task);
+    }
+    assert.equal(server.clientCreated, false);
+    assert.equal(server.calls.length, 0);
+});
+
+test("a Gemini plan with the wrong targets for a new demo is rejected instead of shown", async t => {
+    const server = await startTestServer({ response: JSON.stringify(plan("upi_payment", {
+        steps: [{ instruction: "Open the app.", targetElementId: "trainSource" }]
+    })) });
+    t.after(server.close);
+    const body = await (await server.postTask("I want to send money using UPI.", "en")).json();
+    assert.equal(body.supported, false);
+    assert.deepEqual(body.steps, []);
+});

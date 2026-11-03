@@ -209,3 +209,41 @@ test("does not treat unrelated bill payments as student fee receipts", () => {
     assert.equal(classifyReceiptIntent("I need a receipt for rent payment."), "unrelated");
     assert.equal(classifyReceiptIntent("I need a receipt for my hostel security deposit."), "ambiguous");
 });
+
+test("UPI payment, email-with-attachment and chat-message tasks are classified in English, Hindi and Hinglish", () => {
+    const cases = [
+        ["I want to send money using UPI.", "upi_payment"],
+        ["Mujhe UPI se paise bhejne hain.", "upi_payment"],
+        ["UPI se payment karna hai.", "upi_payment"],
+        ["How do I pay a shopkeeper with GPay?", "upi_payment"],
+        ["I want to send an email with an attachment.", "email_attachment"],
+        ["Mujhe email bhejna hai.", "email_attachment"],
+        ["मुझे ईमेल भेजना है।", "email_attachment"],
+        ["How to attach a file in Gmail?", "email_attachment"],
+        ["Send a photo on WhatsApp.", "chat_message"],
+        ["Mujhe WhatsApp par photo bhejni hai.", "chat_message"],
+        ["व्हाट्सएप पर फोटो भेजें।", "chat_message"]
+    ];
+    for (const [task, category] of cases) {
+        const result = classifyRaastaTask(task, "en");
+        assert.equal(result.category, category, task);
+        assert.equal(result.supported, true, task);
+    }
+});
+
+test("risky messaging or receipt requests do not enter the new simulated workflows", () => {
+    const notSupported = [
+        "How do I delete my WhatsApp backup?",
+        "How can I hack someone's WhatsApp?",
+        "Share my OTP on WhatsApp.",
+        "I need my UPI payment receipt.",
+        "How do I set up my email account?"
+    ];
+    for (const task of notSupported) {
+        const result = classifyRaastaTask(task, "en");
+        assert.ok(!["upi_payment", "email_attachment", "chat_message"].includes(result.category), task);
+    }
+    // Existing workflows keep priority.
+    assert.equal(classifyRaastaTask("I want to download my fee receipt.", "en").category, "fee_receipt");
+    assert.equal(classifyRaastaTask("I want to book a train from Jaipur to Delhi.", "en").category, "train_booking");
+});
