@@ -2,6 +2,8 @@
 
 **Technology, without the confusion.**
 
+[🌍 Try Raasta Live](https://raasta-m2wi.onrender.com/)
+
 Raasta turns an everyday digital task into clear, guided steps. Users describe a task in English, Hindi, or Romanized Hinglish, then follow an interactive simulation or Universal Guidance instructions at their own pace. Raasta highlights the next control, can read instructions aloud, and offers help when a user cannot find what to click.
 
 > **Simulation notice:** The student portal, train booking, document download, and phone settings workflows are examples. Raasta does not book tickets, make payments, download real institutional records, or change device settings.
